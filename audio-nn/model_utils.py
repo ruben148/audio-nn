@@ -7,154 +7,70 @@ Created on Thu Nov 30 19:48:56 2023
 
 import tensorflow as tf
 import os
-from tensorflow.keras import models, layers
+from tensorflow.keras import models, layers, activations
 from tensorflow.keras.regularizers import l1
 import tensorflow_hub as hub
 import ssl
 
-def create_model_v1(config):
-    
-    input_shape = tuple(map(int, config.get('Model', 'input_shape').split(',')))
-    
-    model = models.Sequential()
-
-    model.add(layers.Conv2D(16, (3, 3), activation='relu', input_shape = input_shape, kernel_regularizer=l1(0.5)))
-    model.add(layers.BatchNormalization())
-    model.add(layers.MaxPooling2D((1, 2)))
-    model.add(layers.Dropout(0.2))
-
-    model.add(layers.Conv2D(16, (3, 3), activation='relu', kernel_regularizer=l1(0.5)))
-    model.add(layers.BatchNormalization())
-    model.add(layers.MaxPooling2D((2, 2)))
-    model.add(layers.Dropout(0.2))
-
-    model.add(layers.Conv2D(16, (3, 3), activation='relu', kernel_regularizer=l1(0.5)))
-    model.add(layers.BatchNormalization())
-    model.add(layers.MaxPooling2D((2, 2)))
-    model.add(layers.Dropout(0.2))
-
-    model.add(layers.Flatten())
-    model.add(layers.Dense(8, activation='relu', kernel_regularizer=l1(0.5)))
-    model.add(layers.Dense(4, activation='relu', kernel_regularizer=l1(0.5)))
-    model.add(layers.Dense(1, activation='sigmoid', kernel_regularizer=l1(0.5)))
-
-    return model
-    
-def create_model_v2(config):
-    input_shape = tuple(map(int, config.get('Model', 'input_shape').split(',')))
-    
-    model = models.Sequential()
-
-    model.add(layers.Conv2D(16, (3, 3), activation='relu', input_shape = input_shape))
-    model.add(layers.BatchNormalization())
-    model.add(layers.MaxPooling2D((2, 2)))
-    model.add(layers.Dropout(0.3))
-
-    model.add(layers.Conv2D(32, (3, 3), activation='relu'))
-    model.add(layers.BatchNormalization())
-    model.add(layers.MaxPooling2D((2, 2)))
-    model.add(layers.Dropout(0.3))
-
-    model.add(layers.Conv2D(64, (3, 3), activation='relu'))
-    model.add(layers.BatchNormalization())
-    model.add(layers.MaxPooling2D((2, 2)))
-    model.add(layers.Dropout(0.3))
-
-    model.add(layers.Conv2D(128, (3, 3), activation='relu'))
-    model.add(layers.BatchNormalization())
-    model.add(layers.MaxPooling2D((2, 2)))
-    model.add(layers.Dropout(0.3))
-
-    model.add(layers.Conv2D(256, (3, 3), activation='relu'))
-    model.add(layers.BatchNormalization())
-    model.add(layers.MaxPooling2D((2, 2)))
-    model.add(layers.Dropout(0.3))
-
-    model.add(layers.Flatten())
-    model.add(layers.Dense(32, activation='relu'))
-    model.add(layers.Dense(16, activation='relu'))
-    model.add(layers.Dense(8, activation='relu'))
-    model.add(layers.Dense(4, activation='relu'))
-    model.add(layers.Dense(2, activation='relu'))
-    model.add(layers.Dense(1, activation='sigmoid'))
-
-    return model
-
-def create_model_v3(config):
-    input_shape = tuple(map(int, config.get('Model', 'input_shape').split(',')))
-    
-    model = models.Sequential()
-    model.add(layers.Conv2D(16, (3,3), activation='relu', input_shape=input_shape, kernel_regularizer=l1(0.1)))
-    model.add(layers.Conv2D(16, (3,3), activation='relu', kernel_regularizer=l1(0.1)))
-    model.add(layers.Conv2D(16, (3,3), activation='relu', kernel_regularizer=l1(0.1)))
-    model.add(layers.BatchNormalization())
-    model.add(layers.Dropout(0.2))
-    model.add(layers.MaxPooling2D((1, 2)))
-    model.add(layers.Conv2D(32, (3,3), activation='relu', kernel_regularizer=l1(0.1)))
-    model.add(layers.Conv2D(32, (3,3), activation='relu', kernel_regularizer=l1(0.1)))
-    model.add(layers.Conv2D(32, (3,3), activation='relu', kernel_regularizer=l1(0.1)))
-    model.add(layers.BatchNormalization())
-    model.add(layers.Dropout(0.2))
-    model.add(layers.MaxPooling2D((2, 2)))
-    model.add(layers.Conv2D(32, (3,3), activation='relu', kernel_regularizer=l1(0.1)))
-    model.add(layers.Conv2D(32, (3,3), activation='relu', kernel_regularizer=l1(0.1)))
-    model.add(layers.Conv2D(32, (3,3), activation='relu', kernel_regularizer=l1(0.1)))
-    model.add(layers.BatchNormalization())
-    model.add(layers.Dropout(0.2))
-    model.add(layers.MaxPooling2D((2, 2)))
-    model.add(layers.Conv2D(32, (3,3), activation='relu', kernel_regularizer=l1(0.1)))
-    model.add(layers.Conv2D(32, (3,3), activation='relu', kernel_regularizer=l1(0.1)))
-    model.add(layers.Conv2D(32, (3,3), activation='relu', kernel_regularizer=l1(0.1)))
-    model.add(layers.BatchNormalization())
-    model.add(layers.Dropout(0.2))
-    # model.add(layers.MaxPooling2D((2, 2)))
-    model.add(layers.Flatten())
-    model.add(layers.Dense(16, activation='relu', kernel_regularizer=l1(0.1)))
-    model.add(layers.Dense(8, activation='relu', kernel_regularizer=l1(0.1)))
-    model.add(layers.Dense(1, activation='sigmoid'))
-    return model
-
-def create_model_v4(config):
-    input_shape = tuple(map(int, config.get('Model', 'input_shape').split(',')))
-    
-    model = models.Sequential()
-    model.add(layers.Conv2D(16, (3,3), activation='relu', input_shape=input_shape))
-    model.add(layers.MaxPooling2D((2, 2)))
-    model.add(layers.BatchNormalization())
-    model.add(layers.Dropout(0.2))
-    model.add(layers.Conv2D(16, (3,3), activation='relu'))
-    model.add(layers.MaxPooling2D((2, 2)))
-    model.add(layers.BatchNormalization())
-    model.add(layers.Dropout(0.2))
-    model.add(layers.Flatten())
-    model.add(layers.Dense(32, activation='relu'))
-    model.add(layers.Dense(1, activation='sigmoid'))
-    return model
-
 def create_model_v5(config):
     input_shape = tuple(map(int, config.get('Model', 'input_shape').split(',')))
-    
+    num_classes = config.getint('Model', 'num_classes')
+
     model = models.Sequential()
-    model.add(layers.Conv2D(32, (3,3), activation='relu', input_shape=input_shape))
+    model.add(layers.Conv2D(32, (3,3), input_shape=input_shape))
+    # model.add(layers.BatchNormalization())
+    model.add(layers.Activation(activations.relu))
+
     model.add(layers.Conv2D(32, (3,3), activation='relu'))
+    # model.add(layers.BatchNormalization())
+    model.add(layers.Activation(activations.relu))
+
     model.add(layers.MaxPooling2D((1, 2)))
-    model.add(layers.Dropout(0.1))
-    model.add(layers.Conv2D(32, (3,3), strides = 2, activation='relu'))
-    model.add(layers.Conv2D(32, (3,3), activation='relu'))
+    model.add(layers.Dropout(0.15)) # 0.1 -> 0.15
+
+    model.add(layers.Conv2D(32, (3,3))) # strides=2 -> strides=1
+    # model.add(layers.BatchNormalization())
+    model.add(layers.Activation(activations.relu))
+
+    model.add(layers.Conv2D(32, (3,3)))
+    # model.add(layers.BatchNormalization())
+    model.add(layers.Activation(activations.relu))
+
     model.add(layers.MaxPooling2D((2, 2)))
-    model.add(layers.Dropout(0.1))
-    model.add(layers.Conv2D(32, (3,3), activation='relu'))
-    model.add(layers.Conv2D(32, (3,3), activation='relu'))
+    model.add(layers.Dropout(0.15)) # 0.1 -> 0.15
+
+    model.add(layers.Conv2D(32, (3,3)))
+    # model.add(layers.BatchNormalization())
+    model.add(layers.Activation(activations.relu))
+
+    model.add(layers.Conv2D(32, (3,3)))
+    # model.add(layers.BatchNormalization())
+    model.add(layers.Activation(activations.relu))
+
+    model.add(layers.MaxPooling2D((2, 2))) # (3, 3) -> (2, 2)
+    model.add(layers.Dropout(0.15)) # 0.1 -> 0.15
+
+    model.add(layers.Conv2D(32, (3,3)))
+    # model.add(layers.BatchNormalization())
+    model.add(layers.Activation(activations.relu))
+
+    model.add(layers.Conv2D(64, (3,3)))
+    # model.add(layers.BatchNormalization())
+    model.add(layers.Activation(activations.relu))
+
+    model.add(layers.Conv2D(128, (3,3))) # 96 -> 128
+    # model.add(layers.BatchNormalization())
+    model.add(layers.Activation(activations.relu))
+
+    model.add(layers.Dropout(0.15)) # 0.1 -> 0.15
     model.add(layers.MaxPooling2D((3, 3)))
-    model.add(layers.Dropout(0.1))
-    model.add(layers.Conv2D(32, (3,3), activation='relu'))
-    model.add(layers.Conv2D(64, (3,3), activation='relu'))
-    model.add(layers.Conv2D(96, (3,3), activation='relu'))
-    model.add(layers.Dropout(0.1))#new 0.05 -> 0.1
-    model.add(layers.MaxPooling2D((3, 3)))
+
     model.add(layers.Flatten())
-    model.add(layers.Dense(10, activation='relu'))# 8 -> 10
-    model.add(layers.Dense(1, activation='sigmoid'))
+    model.add(layers.Dense(16, activation='relu')) # 10 -> 16
+    if num_classes == 2:
+        model.add(layers.Dense(1, activation='sigmoid'))
+    else:
+        model.add(layers.Dense(num_classes  , activation='softmax'))
     return model
 
 def create_yamnet(config):

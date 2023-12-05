@@ -9,42 +9,55 @@ import os
 import numpy as np
 from audio_utils import load_wav_16k_mono, load_wav_16k_mono_v2, zero_pad_wav, compute_mfcc, compute_stft
 from sklearn.utils import shuffle
+from sklearn.preprocessing import OneHotEncoder
 
 
-def load_dataset(config, balanced = False):
+def load_dataset(config, ratio = 2):
     input_dir = config.get("Dataset", "dir")
-    pos_dir = os.path.join(input_dir, 'pos')
-    neg_dir = os.path.join(input_dir, 'neg')
-    
-    pos_files = os.listdir(pos_dir)
-    neg_files = os.listdir(neg_dir)
+    num_classes = config.getint('Model', 'num_classes')
 
-    pos_labels = np.ones(len(pos_files))
-    neg_labels = np.zeros(len(neg_files))
+    files = []
+    labels = []
 
-    pos_files = np.array(pos_files)
-    neg_files = np.array(neg_files)
-    
-    pos_files = [os.path.join(pos_dir, pos_file) for pos_file in pos_files]
-    neg_files = [os.path.join(neg_dir, neg_file) for neg_file in neg_files]
-    
-    pos_files, pos_labels = shuffle(pos_files, pos_labels, random_state=5342)
-    neg_files, neg_labels = shuffle(neg_files, neg_labels, random_state=6754)
+    if num_classes == 2:
+        pos_dir = os.path.join(input_dir, 'pos')
+        neg_dir = os.path.join(input_dir, 'neg')
+        
+        pos_files = os.listdir(pos_dir)
+        neg_files = os.listdir(neg_dir)
 
-    neg_files = neg_files[:len(pos_files)*2]
-    neg_labels = neg_labels[:len(pos_labels)*2]
+        pos_labels = np.ones(len(pos_files))
+        neg_labels = np.zeros(len(neg_files))
 
-    if balanced:
-        neg_files = neg_files[:len(pos_files)]
-        neg_labels = neg_labels[:len(pos_labels)]
-        pos_files = pos_files[:len(neg_files)]
-        pos_labels = pos_labels[:len(neg_labels)]
+        pos_files = np.array(pos_files)
+        neg_files = np.array(neg_files)
+        
+        pos_files = [os.path.join(pos_dir, pos_file) for pos_file in pos_files]
+        neg_files = [os.path.join(neg_dir, neg_file) for neg_file in neg_files]
+        
+        pos_files, pos_labels = shuffle(pos_files, pos_labels, random_state=5342)
+        neg_files, neg_labels = shuffle(neg_files, neg_labels, random_state=6754)
 
-    files = np.concatenate((pos_files, neg_files))
-    labels = np.concatenate((pos_labels, neg_labels))
-    
-    files, labels = shuffle(files, labels, random_state = 45678876)
-    return files, labels
+        neg_files = neg_files[:len(pos_files)*ratio]
+        neg_labels = neg_labels[:len(pos_labels)*ratio]
+
+        files = np.concatenate((pos_files, neg_files))
+        labels = np.concatenate((pos_labels, neg_labels))
+        
+        files, labels = shuffle(files, labels, random_state = 45678876)
+        classes = ["neg", "pos"]
+    else:
+        classes_dirs = [os.path.join(input_dir, folder) for folder in os.listdir(input_dir)]
+        for class_dir in classes_dirs:
+            for file in os.listdir(class_dir):
+                files.append(os.path.join(class_dir, file))
+                labels.append(os.path.basename(class_dir))
+        encoder = OneHotEncoder(sparse=False)
+        classes = np.unique(labels)
+        labels = np.array(labels).reshape(-1, 1)
+        labels = encoder.fit_transform(labels)
+
+    return files, labels, classes
 
 def load_dataset_full(config):
     input_dir = config.get("Dataset", "dir")
