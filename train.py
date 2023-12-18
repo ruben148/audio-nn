@@ -7,11 +7,9 @@ Created on Thu Nov 30 19:57:20 2023
 
 import configparser
 import tensorflow as tf
-from model_utils import create_model_v5, train_model, save_model, quantize_model
+from model_utils import create_model_v6, create_model_v5, train_model, save_model, quantize_model
 from dataset_utils import load_dataset, data_generator, representative_dataset_gen
 from sklearn.model_selection import train_test_split
-from sklearn.utils.class_weight import compute_class_weight
-import os
 from callbacks import SaveModelEachEpoch, SaveBestModel
 import numpy as np
 
@@ -23,22 +21,18 @@ config = configparser.ConfigParser()
 config.read('/home/buu3clj/radar_ws/audio-nn/config.ini')
 
 
-files, labels, c = load_dataset(config)
+files, labels, classes, class_weights_dict = load_dataset(config)
 
-files_train, files_val, labels_train, labels_val = train_test_split(files, labels, test_size=0.3, random_state=42, stratify=labels)
-
-class_labels = np.unique(labels)
-class_weights = compute_class_weight('balanced', classes = class_labels, y = labels)
-class_weights_dict = dict(zip(class_labels, class_weights))
+files_train, files_val, labels_train, labels_val = train_test_split(files, labels, test_size=0.2, random_state=42, stratify=labels)
 
 batch_size = config.getint("Training", "batch_size")
 
 data_gen_train = data_generator(config, files_train, labels_train, batch_size, None)
 data_gen_val = data_generator(config, files_val, labels_val, batch_size, None)
 
-model = create_model_v5(config)
+model = create_model_v6(config)
 
-model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=1e-4), loss='BinaryCrossentropy', metrics=['accuracy'])
+model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=5e-5), loss='categorical_crossentropy', metrics=['accuracy'])
 print(model.summary())
 
 input("Press enter to continue...")
@@ -52,6 +46,7 @@ train_model(config, model,
              len(files_train),
              len(files_val),
              callbacks=[save_each_epoch_callback, save_best_model_callback],
-             class_weights=class_weights_dict)
+             class_weights=class_weights_dict
+             )
 
 save_model(config, model, "final_chainsaw.h5")
