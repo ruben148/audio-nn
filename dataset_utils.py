@@ -84,24 +84,24 @@ def data_generator(config, files, labels, batch_size, augmentation_generator = N
             files_batch = files[i:i+batch_size]
             labels_batch = labels[i:i+batch_size]
 
-            feature_type = config.get("Audio data", "feature_type")
-            time_axis = int(config.get('Model', 'input_shape').split(',')[1])
-            k_axis = int(config.get('Model', 'input_shape').split(',')[0])
+            feature_types = config.get("Audio data", "feature_types").split(',')
+            time_axis = config.getint('Audio data', 'time_axis')
+            k_axis = config.getint('Audio data', 'k_axis')
             n_fft = config.getint('Audio data', 'n_fft')
             keep_samples = config.getint("Audio data", "keep_samples")
 
             wavs = np.array([zero_pad_wav(load_wav_16k_mono_v2(filename), keep_samples) for filename in files_batch])
             
-            compute_fn = switch_compute_fn(feature_type)
+            compute_fns = [switch_compute_fn(feature_type) for feature_type in feature_types]
 
-            feature = [compute_fn(wav, time_axis, k_axis, n_fft) for wav in wavs]
-            
-            feature = np.array(feature)
+            features = [[compute_fn(wav, time_axis, k_axis, n_fft) for wav in wavs] for compute_fn in compute_fns]
 
-            feature = (feature-np.min(feature))/(np.max(feature)-np.min(feature))
+            features = [(feature-np.min(feature))/(np.max(feature)-np.min(feature)) for feature in features]
+
+            features = np.stack(features, axis = 3)
             
-            # feature = feature.astype(np.uint8)
-            yield feature, labels_batch
+            # features = features.astype(np.uint8)
+            yield features, labels_batch
 
 def test_generator(files, batch_size):
     while True:

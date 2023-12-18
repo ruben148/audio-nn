@@ -125,7 +125,11 @@ def create_model_v5(config):
     return model
 
 def create_model_v6(config):
-    input_shape = tuple(map(int, config.get('Model', 'input_shape').split(',')))
+    feature_types = config.get("Audio data", "feature_types").split(',')
+    time_axis = config.getint('Audio data', 'time_axis')
+    k_axis = config.getint('Audio data', 'k_axis')
+    input_shape = (k_axis, time_axis, len(feature_types))
+
     num_classes = config.getint('Dataset', 'num_classes')
 
     model = models.Sequential()
@@ -156,8 +160,18 @@ def create_model_v6(config):
     model.add(layers.Activation(activations.relu))
     model.add(layers.Conv2D(160, (3,3)))
     model.add(layers.Activation(activations.relu))
-    model.add(layers.Dropout(0.15))
-    model.add(layers.MaxPooling2D((3, 3)))
+    # model.add(layers.Dropout(0.15))
+    # model.add(layers.MaxPooling2D((3, 3)))
+
+    timesteps = 6  # from the model summary
+    features = 6 * 160  # from the model summary
+
+    # Add the Reshape layer
+    model.add(layers.Reshape((timesteps, features)))
+
+    # Add the LSTM layer
+    model.add(layers.LSTM(64))
+
 
     model.add(layers.Flatten())
     model.add(layers.Dense(16, activation='relu'))
