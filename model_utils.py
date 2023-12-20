@@ -126,71 +126,150 @@ def create_model_v5(config):
 
 def create_model_v6(config):
     feature_types = config.get("Audio data", "feature_types").split(',')
-    time_axis = config.getint('Audio data', 'time_axis')
-    k_axis = config.getint('Audio data', 'k_axis')
-    input_shape = (k_axis, time_axis, len(feature_types))
+    time_axis = config.getint('Audio data', f'{feature_types[0]}_time_axis')
+    k_axis = config.getint('Audio data', f'{feature_types[0]}_k_axis')
+    input_shape = (time_axis, k_axis, len(feature_types))
 
     num_classes = config.getint('Dataset', 'num_classes')
 
-    model = models.Sequential()
-    model.add(layers.Conv2D(16, (3,3), input_shape=input_shape))
-    model.add(layers.Activation(activations.relu))
+    input = layers.Input(input_shape)
 
-    model.add(layers.MaxPooling2D((1, 2)))
+    conv = layers.Conv2D(filters = 16, kernel_size = (3,3), padding = 'same')(input)
+    activation = layers.Activation(activations.relu)(conv)
+    max_pool = layers.MaxPooling2D((2, 2))(activation)
 
-    model.add(layers.Conv2D(32, (3,3)))
-    model.add(layers.Activation(activations.relu))
+    conv = layers.Conv2D(filters = 32, kernel_size = (3,3), padding = 'same')(max_pool)
+    activation = layers.Activation(activations.relu)(conv)
+    max_pool = layers.MaxPooling2D((2, 2))(activation)
 
-    model.add(layers.MaxPooling2D((2, 2)))
-    model.add(layers.Dropout(0.15))
+    shape = max_pool.shape.as_list()
+    reshape = layers.Reshape((4, int(shape[1]/4), shape[2], shape[3]))(max_pool)
 
-    model.add(layers.Conv2D(64, (3,3)))
-    model.add(layers.Activation(activations.relu))
+    conv_lstm_1 = layers.ConvLSTM2D(32, (3,3), name="conv_lstm_1", return_sequences=True)(reshape)
 
-    model.add(layers.MaxPooling2D((2, 2)))
-    model.add(layers.Dropout(0.15))
+    time_distributed_pool = layers.TimeDistributed(layers.MaxPooling2D((2, 2)))(conv_lstm_1)
 
-    model.add(layers.Conv2D(96, (3,3), strides=2))
-    model.add(layers.Activation(activations.relu))
+    conv_lstm_2 = layers.ConvLSTM2D(32, (3,3), name="conv_lstm_2", return_sequences=False)(time_distributed_pool)
 
-    model.add(layers.MaxPooling2D((3, 3)))
-    model.add(layers.Dropout(0.15))
+    flatten = layers.Flatten()(conv_lstm_2)
+    dense = layers.Dense(16, activation='relu')(flatten)
+    output = layers.Dense(num_classes, activation='softmax')(dense)
 
-    model.add(layers.Conv2D(128, (3,3)))
-    model.add(layers.Activation(activations.relu))
-    model.add(layers.Conv2D(160, (3,3)))
-    model.add(layers.Activation(activations.relu))
-    # model.add(layers.Dropout(0.15))
-    # model.add(layers.MaxPooling2D((3, 3)))
-
-    timesteps = 6  # from the model summary
-    features = 6 * 160  # from the model summary
-
-    # Add the Reshape layer
-    model.add(layers.Reshape((timesteps, features)))
-
-    # Add the LSTM layer
-    model.add(layers.LSTM(64))
-
-
-    model.add(layers.Flatten())
-    model.add(layers.Dense(16, activation='relu'))
-
-    model.add(layers.Dense(num_classes  , activation='softmax'))
+    model = models.Model(inputs=input, outputs=output)
     return model
 
-def create_yamnet(config):
-    input_shape = tuple(map(int, config.get('Model', 'input_shape').split(',')))
+def create_model_optuna(config, trial):
+    feature_types = config.get("Audio data", "feature_types").split(',')
+    num_classes = config.getint('Dataset', 'num_classes')
 
-    ssl._create_default_https_context = ssl._create_unverified_context
-    yamnet_model = hub.load("https://tfhub.dev/google/yamnet/1")
-    yamnet_model.build(input_shape)
+    flatten = []
+    inputs = []
+    for feature_type in feature_types:
+        time_axis = config.getint('Audio data', f'{feature_type}_time_axis')
+        k_axis = config.getint('Audio data', f'{feature_type}_k_axis')
+        input = layers.Input(shape=(time_axis, k_axis, 1))
+        inputs.append(input)
+        num_conv_layers = trial.suggest_int(f'num_conv_layers_{feature_type}', 3, 8)
+        aux = input
+        for j in range(num_conv_layers):
+            shape = aux.shape
+            k = trial.suggest_int(f'kernel_size_{feature_type}_{j}', 1, min(shape[1], shape[2], 6))
+            filters = trial.suggest_int(f'num_filters_{feature_type}_{j}', 16, 200)
+            kernel_size = (k, k)
 
-    model = tf.keras.Sequential([
-        yamnet_model,
-        tf.keras.layers.Dense(1, activation='sigmoid')
-    ])
+            conv = layers.Conv2D(filters, kernel_size)(aux)
+            act = layers.Activation(activations.relu)(conv)
 
+            s = trial.suggest_int(f'pooling_strides_{feature_type}_{j}', 1, 5)
+            strides = (s, s)
+            shape = act.shape
+            pooling_size = trial.suggest_int(f'pooling_size_{feature_type}_{j}', 1, min(shape[1],shape[2],5))
+            
+            if shape[1]/shape[2]>1.9:
+                pooling_size = (pooling_size, 1)
+            else:
+                pooling_size = (pooling_size, pooling_size)
+            pooling = layers.MaxPooling2D(pooling_size, strides = strides)(act)
+
+            dropout = layers.Dropout(0.15)(pooling)
+            aux = dropout
+        flatten.append(layers.Flatten()(dropout))
+
+    concat = layers.Concatenate()(flatten)
+
+    dense_units = trial.suggest_int('dense_units', 12, 36)
+    dense = layers.Dense(dense_units, activation='relu')(concat)
+    dropout_rate = trial.suggest_float('dropout_rate', 0, 0.5)
+    dropout = layers.Dropout(dropout_rate)(dense)
+    output = layers.Dense(num_classes, activation='softmax')(dropout)
+    model = models.Model(inputs=inputs, outputs=output)
+    return model
+
+def create_model_optuna_lstm(config, trial):
+    feature_types = config.get("Audio data", "feature_types").split(',')
+    num_classes = config.getint('Dataset', 'num_classes')
+    time_steps = config.getint("Model", "time_steps")
+
+    flatten = []
+    inputs = []
+    for feature_type in feature_types:
+        time_axis = config.getint('Audio data', f'{feature_type}_time_axis')
+        k_axis = config.getint('Audio data', f'{feature_type}_k_axis')
+        input = layers.Input(shape=(time_axis, k_axis, 1))
+        inputs.append(input)
+        num_conv_layers = trial.suggest_int(f'num_conv_layers_{feature_type}', 1, 2)
+        num_conv_lstm_layers = trial.suggest_int(f'num_conv_lstm_layers_{feature_type}', 4, 8)
+        aux = input
+        for j in range(num_conv_layers+num_conv_lstm_layers):
+            shape = aux.shape
+            k = trial.suggest_int(f'kernel_size_{feature_type}_{j}', 1, min(shape[1], shape[2], 5))
+            filters = trial.suggest_int(f'num_filters_{feature_type}_{j}', 8, 64)
+            kernel_size = (k, k)
+
+            if j < num_conv_layers:
+                conv = layers.SeparableConv2D(filters, kernel_size, padding='same')(aux)
+            else:
+                if j == num_conv_layers:
+                    if shape[1] % time_steps == 0:
+                        print("Shapes is divisible by time_steps.")
+                    else:
+                        print("\nShapes is not divisible by time_steps: ")
+                        print("Shape is: ", shape, " after ", num_conv_layers, " convolution layers.")
+                    assert shape[1] % time_steps == 0
+                    reshape = layers.Reshape((time_steps, int(shape[1]/time_steps), int(shape[2]), int(shape[3])))(aux)
+                    aux = reshape
+                if j == num_conv_layers+num_conv_lstm_layers-1:
+                    return_sequences = False
+                else:
+                    return_sequences = True
+                conv = layers.ConvLSTM2D(filters, kernel_size, return_sequences=return_sequences, padding='same')(aux)
+
+            act = layers.Activation(activations.relu)(conv)
+
+            if j>=num_conv_layers:
+                    # pooling = layers.TimeDistributed(layers.MaxPooling2D(pooling_size))(act)
+                pooling = act
+            else:
+                shape = act.shape
+                s = trial.suggest_int(f'pooling_strides_{feature_type}_{j}', 1, 2)
+                strides = (s, s)
+                pooling_size = trial.suggest_int(f'pooling_size_{feature_type}_{j}', 1, min(shape[1],shape[2],5))
+                pooling_size = (pooling_size, pooling_size)
+                pooling = layers.MaxPooling2D(pooling_size, strides = strides, padding='same')(act)
+
+            # dropout_rate = trial.suggest_float('dropout_rate_F{feature_type}_B{j}', 0, 0.2)
+            dropout = layers.Dropout(0.1)(pooling)
+            aux = dropout
+        flatten.append(layers.Flatten()(dropout))
+
+    concat = layers.Concatenate()(flatten)
+
+    dense_units = trial.suggest_int('dense_units', 12, 48)
+    dense = layers.Dense(dense_units, activation='relu')(concat)
+    dropout_rate = trial.suggest_float('dropout_rate', 0, 0.3)
+    dropout = layers.Dropout(dropout_rate)(dense)
+    output = layers.Dense(num_classes, activation='softmax')(dropout)
+    model = models.Model(inputs=inputs, outputs=output)
     return model
 
 def train_model(config, model, data_gen_train, data_gen_val, n_data_train, n_data_val, callbacks=[], class_weights=None):
