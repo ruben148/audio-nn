@@ -26,3 +26,22 @@ class SaveBestModel(Callback):
             best_model_filename = f"{self.model_name}_best.h5"
             self.model.save(best_model_filename)
             print(f"Best model saved as {best_model_filename}")
+
+class EarlyStoppingAccuracy(Callback):
+    def __init__(self, threshold=0.5, patience=3):
+        super(EarlyStoppingAccuracy, self).__init__()
+        self.threshold = threshold
+        self.patience = patience
+        self.best_val_accuracy = 0
+        self.wait = 0
+
+    def on_epoch_end(self, epoch, logs=None):
+        current_val_accuracy = logs.get('val_accuracy')
+        if current_val_accuracy > self.best_val_accuracy:
+            self.best_val_accuracy = current_val_accuracy
+            self.wait = 0
+        elif current_val_accuracy < self.threshold:
+            self.wait += 1
+            if self.wait >= self.patience:
+                self.model.stop_training = True
+                print(f"\nStopping training: val_accuracy under {self.threshold} for {self.patience} epochs")
