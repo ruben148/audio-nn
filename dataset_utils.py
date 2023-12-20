@@ -11,49 +11,31 @@ from audio_utils import load_wav_16k_mono, load_wav_16k_mono_v2, zero_pad_wav, c
 from sklearn.utils import shuffle
 from sklearn.preprocessing import OneHotEncoder
 from sklearn.utils.class_weight import compute_class_weight
+import random
 
-def load_dataset(config, ratio = 2):
+def load_dataset(config, ratio = None, keep = 1.0):
     input_dir = config.get("Dataset", "dir")
 
     files = []
     labels = []
 
-    """
-    if num_classes == 2:
-        pos_dir = os.path.join(input_dir, 'pos')
-        neg_dir = os.path.join(input_dir, 'neg')
-        
-        pos_files = os.listdir(pos_dir)
-        neg_files = os.listdir(neg_dir)
-
-        pos_labels = np.ones(len(pos_files))
-        neg_labels = np.zeros(len(neg_files))
-
-        pos_files = np.array(pos_files)
-        neg_files = np.array(neg_files)
-        
-        pos_files = [os.path.join(pos_dir, pos_file) for pos_file in pos_files]
-        neg_files = [os.path.join(neg_dir, neg_file) for neg_file in neg_files]
-        
-        pos_files, pos_labels = shuffle(pos_files, pos_labels, random_state=5342)
-        neg_files, neg_labels = shuffle(neg_files, neg_labels, random_state=6754)
-
-        neg_files = neg_files[:len(pos_files)*ratio]
-        neg_labels = neg_labels[:len(pos_labels)*ratio]
-
-        files = np.concatenate((pos_files, neg_files))
-        labels = np.concatenate((pos_labels, neg_labels))
-        
-        files, labels = shuffle(files, labels, random_state = 45678876)
-        classes = ["neg", "pos"]
-    else:
-    """
-
     classes_dirs = [os.path.join(input_dir, folder) for folder in os.listdir(input_dir)]
     for class_dir in classes_dirs:
+        per_class_files = []
+        per_class_labels = []
         for file in os.listdir(class_dir):
-            files.append(os.path.join(class_dir, file))
-            labels.append(os.path.basename(class_dir))
+            per_class_files.append(os.path.join(class_dir, file))
+            per_class_labels.append(os.path.basename(class_dir))
+
+        combined = list(zip(per_class_files, per_class_labels))
+        random.seed(1234567)
+        random.shuffle(combined)
+        per_class_files, per_class_labels = zip(*combined)
+
+        per_class_files = per_class_files[:int(len(per_class_files)*keep)]
+        per_class_labels = per_class_labels[:int(len(per_class_labels)*keep)]
+        files.extend(per_class_files)
+        labels.extend(per_class_labels)
 
     classes = np.unique(labels)
     class_weights = compute_class_weight('balanced', classes=classes, y=np.array(labels))
@@ -65,6 +47,16 @@ def load_dataset(config, ratio = 2):
 
     class_indices = range(len(classes))
     class_weights_indexed = {class_index: class_weights_dict[cls] for cls, class_index in zip(classes, class_indices)}
+
+    combined = list(zip(files, labels_one_hot))
+
+    random.seed(7654321)
+    random.shuffle(combined)
+
+    files, labels_one_hot = zip(*combined)
+
+    files = list(files)
+    labels_one_hot = np.array(labels_one_hot)
 
     return files, labels_one_hot, classes, class_weights_indexed
 
@@ -85,8 +77,8 @@ def data_generator(config, files, labels, batch_size, augmentation_generator = N
             labels_batch = labels[i:i+batch_size]
 
             feature_types = config.get("Audio data", "feature_types").split(',')
-            time_axis = config.getint('Audio data', 'time_axis')
-            k_axis = config.getint('Audio data', 'k_axis')
+            time_axis = config.getint('Audio data', f'{feature_types[0]}_time_axis')
+            k_axis = config.getint('Audio data', f'{feature_types[0]}_k_axis')
             n_fft = config.getint('Audio data', 'n_fft')
             keep_samples = config.getint("Audio data", "keep_samples")
 
