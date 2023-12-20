@@ -95,6 +95,36 @@ def data_generator(config, files, labels, batch_size, augmentation_generator = N
             # features = features.astype(np.uint8)
             yield features, labels_batch
 
+def data_generator_multi_shape(config, files, labels, batch_size, augmentation_generator = None):
+    while True:
+        for i in range(0, len(files), batch_size):
+            files_batch = files[i:i+batch_size]
+            labels_batch = labels[i:i+batch_size]
+
+            n_fft = config.getint('Audio data', 'n_fft')
+            feature_types = config.get("Audio data", "feature_types").split(',')
+            keep_samples = config.getint("Audio data", "keep_samples")
+            time_steps = config.getint("Model", "time_steps")
+            wavs = np.array([zero_pad_wav(load_wav_16k_mono_v2(filename), keep_samples) for filename in files_batch])
+
+            features_dict = {}
+            for feature_type in feature_types:
+                time_axis = config.getint('Audio data', f'{feature_type}_time_axis')
+                k_axis = config.getint('Audio data', f'{feature_type}_k_axis')
+                compute_fn = switch_compute_fn(feature_type)
+                feature = [compute_fn(wav, time_axis, k_axis, n_fft) for wav in wavs]
+                feature = (feature-np.min(feature))/(np.max(feature)-np.min(feature))
+                feature = np.array(feature)
+                # feature = feature.astype(np.uint8)
+                features_dict[feature_type] = feature
+
+                if time_steps > 1:
+                    assert feature.shape[1] % time_steps == 0
+                    new_shape = (feature.shape[0], time_steps, int(feature.shape[1] / time_steps), feature.shape[2])
+                    feature = feature.reshape(new_shape)
+            
+            yield [features_dict[feature_type] for feature_type in feature_types], labels_batch
+
 def test_generator(files, batch_size):
     while True:
         for i in range(0, len(files), batch_size):
