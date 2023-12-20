@@ -46,6 +46,7 @@ def compute_stft(wav, time_axis, k_axis, n_fft = 1024):
     k, t = s.shape
     assert k == k_axis
     assert t == time_axis
+    s = np.transpose(s)
     return s
 
 def compute_mfcc(wav, time_axis, k_axis, n_fft = 1024):
@@ -58,6 +59,7 @@ def compute_mfcc(wav, time_axis, k_axis, n_fft = 1024):
     k, t = m.shape
     assert k == k_axis
     assert t == time_axis
+    m = np.transpose(m)
     return m
 
 def compute_chroma_stft(wav, time_axis, k_axis, n_fft = 1024):
@@ -73,4 +75,5 @@ def compute_chroma_stft(wav, time_axis, k_axis, n_fft = 1024):
     k, t = s.shape
     assert k == k_axis
     assert t == time_axis
+    s = np.transpose(s)
     return s
