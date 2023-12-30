@@ -1,20 +1,21 @@
 from keras.callbacks import Callback
+from audio_nn import model as model_utils
 import os
 
 class SaveModelEachEpoch(Callback):
     def __init__(self, config):
         super(SaveModelEachEpoch, self).__init__()
-        self.model_name = os.path.join(config.get("Model", "dir"), config.get("Model", "filename"))
+        self.config = config
 
     def on_epoch_end(self, epoch, logs=None):
-        model_filename = f"{self.model_name}_epoch_{epoch + 1}.h5"
-        self.model.save(model_filename)
-        print(f"Model saved as {model_filename}")
+        model_suffix = f"_epoch_{epoch + 1}"
+        model_utils.save_model(self.config, self.model, model_suffix)
+        print("Model saved.")
 
 class SaveBestModel(Callback):
     def __init__(self, config):
         super(SaveBestModel, self).__init__()
-        self.model_name = os.path.join(config.get("Model", "dir"), config.get("Model", "filename"))
+        self.config = config
         self.best_loss = float('inf')
         self.best_epoch = 0
 
@@ -23,9 +24,9 @@ class SaveBestModel(Callback):
         if current_loss < self.best_loss:
             self.best_loss = current_loss
             self.best_epoch = epoch + 1
-            best_model_filename = f"{self.model_name}_best.h5"
-            self.model.save(best_model_filename)
-            print(f"Best model saved as {best_model_filename}")
+            model_suffix =  "_best"
+            model_utils.save_model(self.config, self.model, model_suffix)
+            print(f"Best model saved.")
 
 class EarlyStoppingAccuracy(Callback):
     def __init__(self, threshold=0.5, patience=3):
@@ -45,3 +46,52 @@ class EarlyStoppingAccuracy(Callback):
             if self.wait >= self.patience:
                 self.model.stop_training = True
                 print(f"\nStopping training: val_accuracy under {self.threshold} for {self.patience} epochs")
+
+class EarlyStoppingMixedCriteria(Callback):
+    def __init__(self, accuracy_threshold=0.7, min_delta=0.005, loss_patience=3, accuracy_patience=16, early_epoch_threshold=10):
+        super(EarlyStoppingMixedCriteria, self).__init__()
+        self.accuracy_threshold = accuracy_threshold
+        self.min_delta = min_delta
+        self.loss_patience = loss_patience
+        self.accuracy_patience = accuracy_patience
+        self.early_epoch_threshold = early_epoch_threshold
+        self.best_val_loss = float('inf')
+        self.wait_loss = 0
+        self.wait_accuracy = 0
+        self.stopped_early = False
+        self.val_loss_history = []
+        self.val_accuracy_history = []
+
+    def on_epoch_end(self, epoch, logs=None):
+        current_val_accuracy = logs.get('val_accuracy')
+        current_val_loss = logs.get('val_loss')
+
+        self.val_loss_history.append(current_val_loss)
+        self.val_accuracy_history.append(current_val_accuracy)
+
+        if current_val_loss < self.best_val_loss - self.min_delta:
+            self.best_val_loss = current_val_loss
+            self.wait_loss = 0
+        else:
+            self.wait_loss += 1
+
+        if current_val_accuracy < self.accuracy_threshold:
+            self.wait_accuracy = 0
+        else:
+            self.wait_accuracy += 1
+
+        if epoch >= self.early_epoch_threshold:
+            if len(self.val_loss_history) > 3 and current_val_loss > self.val_loss_history[-4]:
+                print(f"\nStopping training: val_loss increased from 3 epochs ago")
+                self.model.stop_training = True
+                return
+
+            if len(self.val_accuracy_history) > 3 and current_val_accuracy < self.val_accuracy_history[-4]:
+                print(f"\nStopping training: val_accuracy decreased from 3 epochs ago")
+                self.model.stop_training = True
+                return
+
+        if self.wait_loss >= self.loss_patience and self.wait_accuracy >= self.accuracy_patience:
+            self.model.stop_training = True
+            self.stopped_early = True
+            print(f"\nStopping training: No significant improvement in val_loss for {self.loss_patience} epochs or val_accuracy under {self.accuracy_threshold}")

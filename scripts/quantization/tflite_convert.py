@@ -16,9 +16,7 @@ model = load_model(config, "chainsaw_best.h5")
 files, labels = load_dataset(config)
 
 converter = tf.lite.TFLiteConverter.from_keras_model(model)
-print("\nQuantization started...\n")
 quant_model = converter.convert()
-print("\nQuantization ended.\n")
 
 print(len(quant_model))
 

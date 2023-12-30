@@ -11,6 +11,8 @@ from tensorflow.keras import models, layers, activations
 from tensorflow.keras.regularizers import l1
 import tensorflow_hub as hub
 import ssl
+import configparser
+import copy
 
 def create_model_v4(config):
     input_shape = tuple(map(int, config.get('Model', 'input_shape').split(',')))
@@ -169,12 +171,12 @@ def create_model_optuna(config, trial):
         k_axis = config.getint('Audio data', f'{feature_type}_k_axis')
         input = layers.Input(shape=(time_axis, k_axis, 1))
         inputs.append(input)
-        num_conv_layers = trial.suggest_int(f'num_conv_layers_{feature_type}', 3, 8)
+        num_conv_layers = trial.suggest_int(f'num_conv_layers_{feature_type}', 2, 8)
         aux = input
         for j in range(num_conv_layers):
             shape = aux.shape
             k = trial.suggest_int(f'kernel_size_{feature_type}_{j}', 1, min(shape[1], shape[2], 6))
-            filters = trial.suggest_int(f'num_filters_{feature_type}_{j}', 16, 200)
+            filters = trial.suggest_int(f'num_filters_{feature_type}_{j}', 16, 512)
             kernel_size = (k, k)
 
             conv = layers.Conv2D(filters, kernel_size)(aux)
@@ -191,11 +193,14 @@ def create_model_optuna(config, trial):
                 pooling_size = (pooling_size, pooling_size)
             pooling = layers.MaxPooling2D(pooling_size, strides = strides)(act)
 
-            dropout = layers.Dropout(0.15)(pooling)
+            dropout = layers.Dropout(0.10)(pooling)
             aux = dropout
         flatten.append(layers.Flatten()(dropout))
 
-    concat = layers.Concatenate()(flatten)
+    if len(feature_types)==1:
+        concat = flatten[0]
+    else:
+        concat = layers.Concatenate()(flatten)
 
     dense_units = trial.suggest_int('dense_units', 12, 36)
     dense = layers.Dense(dense_units, activation='relu')(concat)
@@ -203,6 +208,51 @@ def create_model_optuna(config, trial):
     dropout = layers.Dropout(dropout_rate)(dense)
     output = layers.Dense(num_classes, activation='softmax')(dropout)
     model = models.Model(inputs=inputs, outputs=output)
+    return model
+
+def create_model_optuna_one_feature(config, trial, time_axis=None, k_axis=None):
+    feature_types = config.get("Audio data", "feature_types").split(',')
+    num_classes = config.getint('Dataset', 'num_classes')
+    feature_type = feature_types[0]
+
+    if time_axis is None:
+        time_axis = config.getint('Audio data', f'{feature_type}_time_axis')
+    if k_axis is None:
+        k_axis = config.getint('Audio data', f'{feature_type}_k_axis')
+    inputs = layers.Input(shape=(time_axis, k_axis, 1))
+
+    num_conv_layers = trial.suggest_int(f'num_conv_layers', 2, 8)
+    aux = inputs
+    for j in range(num_conv_layers):
+        shape = aux.shape
+        k = trial.suggest_int(f'kernel_size_{j}', 1, min(shape[1], shape[2], 6))
+        filters = trial.suggest_int(f'num_filters_{j}', 16, 512)
+        kernel_size = (k, k)
+
+        conv = layers.Conv2D(filters, kernel_size)(aux)
+        act = layers.Activation(activations.relu)(conv)
+
+        s = trial.suggest_int(f'pooling_strides_{j}', 1, 5)
+        strides = (s, s)
+        shape = act.shape
+        pooling_size = trial.suggest_int(f'pooling_size_{j}', 1, min(shape[1],shape[2],5))
+        
+        if shape[1]/shape[2]>1.9:
+            pooling_size = (pooling_size, 1)
+        else:
+            pooling_size = (pooling_size, pooling_size)
+        pooling = layers.MaxPooling2D(pooling_size, strides = strides)(act)
+
+        dropout = layers.Dropout(0.10)(pooling)
+        aux = dropout
+
+    flatten = layers.Flatten()(dropout)
+    dense_units = trial.suggest_int('dense_units', 12, 36)
+    dense = layers.Dense(dense_units, activation='relu')(flatten)
+    dropout_rate = trial.suggest_float('dropout_rate', 0, 0.5)
+    dropout = layers.Dropout(dropout_rate)(dense)
+    output = layers.Dense(num_classes, activation='softmax')(dropout)
+    model = models.Model(inputs=[inputs], outputs=[output])
     return model
 
 def create_model_optuna_lstm(config, trial):
@@ -262,7 +312,10 @@ def create_model_optuna_lstm(config, trial):
             aux = dropout
         flatten.append(layers.Flatten()(dropout))
 
-    concat = layers.Concatenate()(flatten)
+    if len(feature_types)==1:
+        concat = flatten[0]
+    else:
+        concat = layers.Concatenate()(flatten)
 
     dense_units = trial.suggest_int('dense_units', 12, 48)
     dense = layers.Dense(dense_units, activation='relu')(concat)
@@ -283,31 +336,47 @@ def train_model(config, model, data_gen_train, data_gen_val, n_data_train, n_dat
                         callbacks=callbacks,
                         class_weight=class_weights)
 
-def save_model(config, model, filename = None):
-    if filename == None:
-        filename = config.get("Model", "filename")
-        filename = filename + ".h5"
-    output_dir = config.get("Model", "dir")
-    full_path = os.path.join(output_dir, filename)
-    model.save(full_path)
+def save_model(config, model, suffix = None):
+    full_path = config.get("Model", "save_dir")
+    if suffix is not None:
+        full_path = full_path + suffix
+    else:
+        suffix = ""
+    if not os.path.exists(full_path):
+        os.makedirs(full_path)
+    model.save(os.path.join(full_path, "model.h5"))
+    configModified = copy.deepcopy(config)
+    configModified.set("Model", "load_dir", config.get("Model", "load_dir")+suffix)
+    configModified.set("Model", "save_dir", config.get("Model", "save_dir")+suffix)
+    
+    with open(os.path.join(full_path, "config.ini"), 'w') as configfile:
+        configModified.write(configfile)
 
-def save_tfmodel(config, model, filename = None):
-    if filename == None:
-        filename = config.get("Model", "filename")
-        filename = filename + ".h5"
-    output_dir = config.get("Model", "dir")
-    full_path = os.path.join(output_dir, filename)
-    with open(full_path, 'wb') as f:
+def save_tfmodel(config, model, suffix = None):
+    full_path = config.get("Model", "save_dir")
+    if suffix is not None:
+        full_path = full_path + suffix
+    else:
+        suffix = ""
+    if not os.path.exists(full_path):
+        os.makedirs(full_path)
+    with open(os.path.join(full_path, "model.tflite"), 'wb') as f:
         f.write(model)
+    configModified = copy.deepcopy(config)
+    configModified.set("Model", "load_dir", config.get("Model", "load_dir")+suffix)
+    configModified.set("Model", "save_dir", config.get("Model", "save_dir")+suffix)
+    with open(os.path.join(full_path, "config.ini"), 'w') as configfile:
+        configModified.write(configfile)
 
-def load_model(config, filename = None, custom_objects = None):
-        if filename == None:
-            filename = config.get("Model", "filename")
-            filename = filename + ".h5"
-        input_dir = config.get("Model", "dir")
-        full_path = os.path.join(input_dir, filename)
-        loaded_model = tf.keras.models.load_model(full_path, custom_objects=custom_objects)
-        return loaded_model
+def load_model(config, custom_objects = None):
+        full_path = config.get("Model", "load_dir")
+        model_path = os.path.join(full_path, "model.h5")
+        loaded_model = tf.keras.models.load_model(model_path, custom_objects=custom_objects)
+        configOld = configparser.ConfigParser()
+        configOld.read(os.path.join(full_path, 'config.ini'))
+        #TODO copy the dirs from the new config to the old config
+        # assert False
+        return loaded_model, configOld
 
 def quantize_model(config, model, representative_dataset):
     converter = tf.lite.TFLiteConverter.from_keras_model(model)
