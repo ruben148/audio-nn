@@ -144,15 +144,18 @@ def mix(y1, y2, rate=0.5):
 
     return mixed_signal
 
-
 def random_gain(sound, db):
     return sound * np.power(10, random.uniform(-db, db) / 20.0)
+
+def random_crop(sound, final_length):
+    cut_length = len(sound) - final_length
+    cut_start = random.randrange(0, cut_length+1)
+    return sound[cut_start:cut_start+final_length]
 
 def generate_white_noise(length, a=0, b=0.5):
     return np.random.normal(a, b, length)
 
 def generate_pink_noise(length, a=0, b=0.5):
-    # Pink noise generation can be more complex; this is a simplified version
     white_noise = np.random.normal(a, b, length)
     pink_noise = np.cumsum(white_noise)
     pink_noise -= np.mean(pink_noise)

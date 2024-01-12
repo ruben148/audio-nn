@@ -7,11 +7,12 @@ import os
 from tensorflow.keras import models, layers, activations
 from tensorflow.keras.regularizers import l1
 import tensorflow_hub as hub
+import tensorflow_model_optimization as tfmot
 import optuna
 
 physical_devices = tf.config.list_physical_devices('GPU')
 print("Num GPUs:", len(physical_devices))
-tf.config.set_visible_devices(physical_devices[2], 'GPU')
+tf.config.set_visible_devices(physical_devices[3], 'GPU')
 
 config = configparser.ConfigParser()
 config.read('/home/buu3clj/radar_ws/audio_nn/scripts/config.ini')
@@ -24,16 +25,30 @@ batch_size = config.getint("Optuna", "batch_size")
 
 def objective(trial):
 
-    MAX_PARAMS = 250000
-    MIN_PARAMS = 150000
+    MAX_PARAMS = 300000
+    MIN_PARAMS = 100000
 
-    keep_samples = '12288'
+    keep_samples = trial.suggest_categorical("keep_samples", [10752, 11264, 11776, 12288, 12800])
 
-    config.set("Audio data", "keep_samples", keep_samples)
+    config.set("Audio data", "keep_samples", str(keep_samples))
 
-    files, labels, classes, class_weights_dict = dataset_utils.load_dataset(config, keep=keep)
+    files, labels, classes, class_weights_dict = dataset_utils.load_dataset(config)
 
     files_train, files_val, labels_train, labels_val = train_test_split(files, labels, test_size=0.2, random_state=42, stratify=labels)
+
+    augmentation_datasets = []
+    for augmentation_dataset in config.get("Dataset", "augmentation_dir").split(','):
+        d = dataset_utils.load_dataset(config, input_dir=augmentation_dataset, files_only=True)
+        augmentation_datasets.append(d)
+    augmentation_gen = dataset_utils.augmentation_generator([
+        dataset_utils.crop_augmentation(new_length=config.getint("Audio data", "keep_samples"), p=1.0),
+        dataset_utils.gain_augmentation(max_db=5, p=0.8),
+        dataset_utils.noise_augmentation(max_noise_ratio=0.08, p=0.6),
+        dataset_utils.mix_augmentation(augmentation_datasets[0], p=0.35),
+        dataset_utils.mix_augmentation(augmentation_datasets[1], p=0.35),
+        dataset_utils.noise_augmentation(min_noise_ratio=0.01, max_noise_ratio=0.05, p=0.6),
+        dataset_utils.gain_augmentation(max_db=5)
+    ])
 
     feature_types = 'stft'
     config.set("Audio data", "feature_types", feature_types)
@@ -46,8 +61,8 @@ def objective(trial):
         config.set("Audio data", k_axis_name, str(k_axis))
 
     
-    data_gen_train = dataset_utils.data_generator(config, files_train, labels_train, batch_size, None, quantize=False)
-    data_gen_val = dataset_utils.data_generator(config, files_val, labels_val, batch_size, None, quantize=False)
+    data_gen_train = dataset_utils.data_generator(config, files_train, labels_train, batch_size, augmentation_gen, quantize=False)
+    data_gen_val = dataset_utils.data_generator(config, files_val, labels_val, batch_size, augmentation_gen, quantize=False)
 
     try:
         model = model_utils.create_model_optuna(config, trial)
@@ -59,7 +74,11 @@ def objective(trial):
         trial.set_user_attr('failed_reason', str(e))
         return 3
 
-    lr = 15e-6
+    # quantize_model = tfmot.quantization.keras.quantize_model
+
+    # model = quantize_model(model)
+
+    lr = 5e-6
     config.set("Training", "lr", str(lr))
     model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=config.getfloat("Training", "lr")), 
                   loss='categorical_crossentropy', 
@@ -114,6 +133,7 @@ def objective(trial):
 
 
     k = k_loss + (1-k_accuracy)
+    # k = (1-k_accuracy)
 
     trial.set_user_attr('Number of parameters', str(model.count_params()))
     return k
@@ -121,5 +141,5 @@ def objective(trial):
 study = optuna.create_study(direction='minimize', study_name = study_name, storage=sqlite_url, load_if_exists=True)
 study.optimize(objective, n_trials = 100000)
 
-optuna.visualization.plot_optimization_history(study)
+# optuna.visualization.plot_optimization_history(study)
 # optuna.visualization.plot_contour(study, params=['param1', 'param2'])

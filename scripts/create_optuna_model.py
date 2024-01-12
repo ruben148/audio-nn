@@ -5,6 +5,7 @@ from sklearn.model_selection import train_test_split
 import numpy as np
 import os
 from tensorflow.keras import models, layers, activations
+import tensorflow_model_optimization as tfmot
 from tensorflow.keras.regularizers import l1
 import tensorflow_hub as hub
 import optuna
@@ -23,9 +24,9 @@ study = optuna.create_study(direction='minimize', study_name = study_name, stora
 
 trial = study.best_trial
 
-keep_samples = '12288'
+keep_samples = trial.suggest_categorical("keep_samples", [10752, 11264, 11776, 12288, 12800])
 
-config.set("Audio data", "keep_samples", keep_samples)
+config.set("Audio data", "keep_samples", str(keep_samples))
 
 feature_types = 'stft'
 config.set("Audio data", "feature_types", feature_types)
@@ -39,7 +40,7 @@ for feature_type in feature_types.split(','):
 
 model = model_utils.create_model_optuna(config, trial)
 
-lr = 1e-5
+lr=1e-5
 config.set("Training", "lr", str(lr))
 
 model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=config.getfloat("Training", "lr")), 

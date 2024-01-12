@@ -24,4 +24,4 @@ print("\nQuantization ended.\n")
 
 print("Model size (bytes): ", len(quant_model))
 
-model_utils.save_tfmodel(config, quant_model)
+model_utils.save_tfmodel(config, quant_model, "_tflite")

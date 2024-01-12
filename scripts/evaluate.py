@@ -18,7 +18,7 @@ import pandas as pd
 
 physical_devices = tf.config.list_physical_devices('GPU')
 print("Num GPUs:", len(physical_devices))
-tf.config.set_visible_devices(physical_devices[1], 'GPU')
+tf.config.set_visible_devices(physical_devices[3], 'GPU')
 
 config = configparser.ConfigParser()
 config.read('/home/buu3clj/radar_ws/audio_nn/scripts/config.ini')

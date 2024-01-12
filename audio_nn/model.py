@@ -182,10 +182,10 @@ def create_model_optuna(config, trial):
             conv = layers.Conv2D(filters, kernel_size)(aux)
             act = layers.Activation(activations.relu)(conv)
 
-            s = trial.suggest_int(f'pooling_strides_{feature_type}_{j}', 1, 5)
+            s = trial.suggest_int(f'pooling_strides_{feature_type}_{j}', 1, 6)
             strides = (s, s)
             shape = act.shape
-            pooling_size = trial.suggest_int(f'pooling_size_{feature_type}_{j}', 1, min(shape[1],shape[2],5))
+            pooling_size = trial.suggest_int(f'pooling_size_{feature_type}_{j}', 1, min(shape[1],shape[2],6))
             
             if shape[1]/shape[2]>1.9:
                 pooling_size = (pooling_size, 1)
