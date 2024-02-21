@@ -30,14 +30,28 @@ files, labels, classes, class_weights = dataset_utils.load_dataset(config, keep 
 
 batch_size = config.getint("Training", "batch_size")
 
-test_gen = dataset_utils.data_generator(config, files, labels, batch_size)
+augmentation_datasets = []
+for augmentation_dataset in config.get("Dataset", "augmentation_dir").split(','):
+    d = dataset_utils.load_dataset(config, input_dir=augmentation_dataset, files_only=True)
+    augmentation_datasets.append(d)
 
-print("Model summary: ", model.summary())
+augmentation_gen = dataset_utils.augmentation_generator([
+    dataset_utils.crop_augmentation(new_length=config.getint("Audio data", "keep_samples"), p=1.0),
+    dataset_utils.gain_augmentation(max_db=5, p=0.8),
+    dataset_utils.noise_augmentation(max_noise_ratio=0.08, p=0.6),
+    dataset_utils.mix_augmentation(augmentation_datasets[0], p=0.35),
+    dataset_utils.mix_augmentation(augmentation_datasets[1], p=0.35),
+    dataset_utils.noise_augmentation(min_noise_ratio=0.01, max_noise_ratio=0.05, p=0.6),
+    dataset_utils.gain_augmentation(max_db=5)
+])
+
+test_gen = dataset_utils.data_generator(config, files, labels, batch_size, augmentation_gen)
 
 model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=5e-5), 
                   loss='categorical_crossentropy', 
                   metrics=['accuracy'])
-print(model.summary())
+
+print("Model summary: ", model.summary())
 
 evaluation = model.evaluate_generator(test_gen, steps = len(files)//batch_size, verbose=1)
 

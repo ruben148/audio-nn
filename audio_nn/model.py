@@ -375,6 +375,7 @@ def load_model(config, custom_objects = None):
         configOld = configparser.ConfigParser()
         configOld.read(os.path.join(full_path, 'config.ini'))
         #TODO copy the dirs from the new config to the old config
+        configOld["Model"]["save_dir"] = config.get("Model", "save_dir")
         # assert False
         return loaded_model, configOld
 
