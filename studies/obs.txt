@@ -1,0 +1,1 @@
+5.5.2 - fara batch norm 78% - runtime 380ms

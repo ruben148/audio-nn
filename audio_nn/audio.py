@@ -10,6 +10,7 @@ import tensorflow_io as tfio
 import librosa
 import numpy as np
 import random
+import math
 
 def load_wav_16k_mono_tf(filename):
     file_contents = tf.io.read_file(filename)
@@ -25,25 +26,50 @@ def load_wav_16k_mono(filename):
     wav = np.array(wav)
     return wav
 
+def load_wav_8k_mono_tf(filename):
+    file_contents = tf.io.read_file(filename)
+    wav, sample_rate = tf.audio.decode_wav(contents=file_contents, desired_channels=1)
+    wav = tf.squeeze(wav, axis=-1)
+    sample_rate = tf.cast(sample_rate, dtype=tf.int64)
+    wav = tfio.audio.resample(input=wav, rate_in=sample_rate, rate_out=8000)
+    return np.array(wav)
+
+def load_wav_8k_mono(filename):
+    wav, sample_rate = librosa.load(filename)
+    wav = librosa.resample(y = wav, orig_sr = sample_rate, target_sr = 8000)
+    wav = np.array(wav)
+    return wav
+
 def zero_pad_wav(wav, samples = 24576):
     wav = wav[:samples]
     zero_padding = np.zeros(samples-len(wav), dtype = np.float32)
     wav = np.concatenate((wav, zero_padding))
     return wav
 
-def compute_stft(wav, time_axis, k_axis, n_fft = 1024):
+def compute_stft(wav, time_axis, k_axis, n_fft = 512):
     # s = tf.signal.stft(wav, frame_length=896, frame_step=94, fft_length=512, pad_end=True)
     # s = tf.abs(s)
     # s = tf.transpose(s)
-    hop_length = wav.size / time_axis
-    assert int(hop_length) == hop_length
-    hop_length = int(hop_length)
+    
     n_fft = k_axis * 2
     n_fft = int(n_fft)
+
+    # print("n fft",n_fft)
+
+    # hop_length = (wav.size - n_fft) / (time_axis - 1)
+    hop_length = math.floor(wav.size/ time_axis + 1)
+
+    # print("hop length",hop_length)
+
+    # hop_length = int(np.ceil(hop_length))
+    assert int(hop_length) == hop_length
+    hop_length = int(hop_length)
+    # print(hop_length)
+
     s = librosa.stft(y=wav, n_fft=n_fft, hop_length=hop_length, pad_mode="constant")
-    # print("STFT shape: ", s.shape)
     s = np.abs(s)
-    s = s[1:, :-1]
+    # print(s.shape)
+    s = s[1:, :]
     k, t = s.shape
     assert k == k_axis
     assert t == time_axis
@@ -69,7 +95,7 @@ def compute_chroma_stft(wav, time_axis, k_axis, n_fft = 1024):
     hop_length = int(hop_length)
     n_fft = k_axis * 2
     n_fft = int(n_fft)
-    s = librosa.feature.chroma_stft(y=wav, sr=16000, n_fft=n_fft, hop_length=hop_length, pad_mode="constant", n_chroma=k_axis)
+    s = librosa.feature.chroma_stft(y=wav, sr=8000, n_fft=n_fft, hop_length=hop_length, pad_mode="constant", n_chroma=k_axis)
     s = np.abs(s)
     s = s[:, :-1]
     # print("Chroma STFT shape: ", s.shape)
@@ -93,7 +119,9 @@ def a_weight(fs, n_fft, min_db=-80.0):
     return weight
 
 def compute_gain(sound, fs, min_db=-80.0, mode='A_weighting'):
-    if fs == 16000:
+    if fs == 8000:
+        n_fft = 1024
+    elif fs == 16000:
         n_fft = 2048
     elif fs == 44100:
         n_fft = 4096
@@ -120,8 +148,12 @@ def compute_gain(sound, fs, min_db=-80.0, mode='A_weighting'):
 
     return gain_db
 
+def change_pitch(sound, max_variation, fs = 8000):
+    semitones = 12 * np.log2(1 + random.uniform(-max_variation, max_variation))
+        
+    return librosa.effects.pitch_shift(sound, sr=fs, n_steps=semitones, bins_per_octave=12, res_type='soxr_hq', scale=True)
 
-def mix_advanced(sound1, sound2, r, fs=16000):
+def mix_advanced(sound1, sound2, r, fs=8000):
     gain1 = np.max(compute_gain(sound1, fs))  # Decibel
     gain2 = np.max(compute_gain(sound2, fs))
     t = 1.0 / (1 + np.power(10, (gain1 - gain2) / 20.) * (1 - r) / r)

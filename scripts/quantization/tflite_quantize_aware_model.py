@@ -11,8 +11,9 @@ from tensorflow_model_optimization.python.core.quantization.keras.quantize impor
 config = configparser.ConfigParser()
 config.read('/home/buu3clj/radar_ws/audio_nn/scripts/config.ini')
 
-with quantize_scope():
-    model, config = model_utils.load_model(config)
+with tf.keras.utils.custom_object_scope({'BatchNormQuantizeConfig': model_utils.BatchNormQuantizeConfig}):
+    with quantize_scope():
+        model, config = model_utils.load_model(config)
 
 files, labels, classes, class_weights = dataset_utils.load_dataset(config)
 

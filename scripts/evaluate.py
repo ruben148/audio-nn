@@ -8,6 +8,7 @@ import configparser
 
 import tensorflow_model_optimization as tfmot
 import tensorflow as tf
+from tensorflow import keras
 from audio_nn import model as model_utils, dataset as dataset_utils
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import confusion_matrix, classification_report
@@ -18,7 +19,7 @@ import pandas as pd
 
 physical_devices = tf.config.list_physical_devices('GPU')
 print("Num GPUs:", len(physical_devices))
-tf.config.set_visible_devices(physical_devices[3], 'GPU')
+tf.config.set_visible_devices(physical_devices[1], 'GPU')
 
 config = configparser.ConfigParser()
 config.read('/home/buu3clj/radar_ws/audio_nn/scripts/config.ini')
@@ -37,19 +38,19 @@ for augmentation_dataset in config.get("Dataset", "augmentation_dir").split(',')
 
 augmentation_gen = dataset_utils.augmentation_generator([
     dataset_utils.crop_augmentation(new_length=config.getint("Audio data", "keep_samples"), p=1.0),
-    dataset_utils.gain_augmentation(max_db=5, p=0.8),
-    dataset_utils.noise_augmentation(max_noise_ratio=0.08, p=0.6),
-    dataset_utils.mix_augmentation(augmentation_datasets[0], p=0.35),
-    dataset_utils.mix_augmentation(augmentation_datasets[1], p=0.35),
-    dataset_utils.noise_augmentation(min_noise_ratio=0.01, max_noise_ratio=0.05, p=0.6),
-    dataset_utils.gain_augmentation(max_db=5)
+    dataset_utils.gain_augmentation(max_db=3, p=1.0),
+    dataset_utils.noise_augmentation(max_noise_ratio=0.06, p=1.0),
+    dataset_utils.mix_augmentation(augmentation_datasets[0], min_ratio=0.001, max_ratio=0.25, p=1.0),
+    dataset_utils.mix_augmentation(augmentation_datasets[1], min_ratio=0.001, max_ratio=0.25, p=1.0),
+    dataset_utils.noise_augmentation(min_noise_ratio=0.01, max_noise_ratio=0.03, p=1.0),
+    dataset_utils.gain_augmentation(max_db=2, p=1.0)
 ])
 
 test_gen = dataset_utils.data_generator(config, files, labels, batch_size, augmentation_gen)
 
-model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=5e-5), 
-                  loss='categorical_crossentropy', 
-                  metrics=['accuracy'])
+# model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=5e-5), 
+#                   loss='categorical_crossentropy', 
+#                   metrics=['accuracy'])
 
 print("Model summary: ", model.summary())
 

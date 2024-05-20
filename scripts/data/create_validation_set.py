@@ -15,9 +15,9 @@ def move_random_files(src_folder, dest_folder, proportion=0.2):
     for file in files[:num_files_to_move]:
         shutil.move(os.path.join(src_folder, file), os.path.join(dest_folder, file))
 
-datasets_dir = '/home/buu3clj/radar_ws/datasets'
+datasets_dir = '/home/buu3clj/radar_ws/datasets_2_0/chainsaw_dataset_2_0_recorded'
 
-move_random_files(os.path.join(datasets_dir, "train", "13288", "neg"), 
-                    os.path.join(datasets_dir, "validation", "13288", "neg"))
-move_random_files(os.path.join(datasets_dir, "train", "13288", "pos"), 
-                    os.path.join(datasets_dir, "validation", "13288", "pos"))
+move_random_files(os.path.join(datasets_dir, "9216", "train", "neg"), 
+                    os.path.join(datasets_dir, "9216", "validation", "neg"))
+move_random_files(os.path.join(datasets_dir, "9216", "train", "pos"), 
+                    os.path.join(datasets_dir, "9216", "validation", "pos"))

@@ -29,7 +29,7 @@ class SaveBestModel(Callback):
             print(f"Best model saved.")
 
 class EarlyStoppingAccuracy(Callback):
-    def __init__(self, threshold=0.5, patience=3):
+    def __init__(self, threshold=0.5, patience=10):
         super(EarlyStoppingAccuracy, self).__init__()
         self.threshold = threshold
         self.patience = patience
@@ -48,7 +48,7 @@ class EarlyStoppingAccuracy(Callback):
                 print(f"\nStopping training: val_accuracy under {self.threshold} for {self.patience} epochs")
 
 class EarlyStoppingMixedCriteria(Callback):
-    def __init__(self, accuracy_threshold=0.7, min_delta=0.005, loss_patience=3, accuracy_patience=16, early_epoch_threshold=10):
+    def __init__(self, accuracy_threshold=0.7, min_delta=0.005, loss_patience=7, accuracy_patience=7, early_epoch_threshold=15):
         super(EarlyStoppingMixedCriteria, self).__init__()
         self.accuracy_threshold = accuracy_threshold
         self.min_delta = min_delta
@@ -86,10 +86,10 @@ class EarlyStoppingMixedCriteria(Callback):
                 self.model.stop_training = True
                 return
 
-            if len(self.val_accuracy_history) > 3 and current_val_accuracy < self.val_accuracy_history[-4]:
-                print(f"\nStopping training: val_accuracy decreased from 3 epochs ago")
-                self.model.stop_training = True
-                return
+            # if len(self.val_accuracy_history) > 3 and current_val_accuracy < self.val_accuracy_history[-4]:
+            #     print(f"\nStopping training: val_accuracy decreased from 3 epochs ago")
+            #     self.model.stop_training = True
+            #     return
 
         if self.wait_loss >= self.loss_patience and self.wait_accuracy >= self.accuracy_patience:
             self.model.stop_training = True

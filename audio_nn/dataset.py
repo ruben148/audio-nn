@@ -7,7 +7,7 @@ Created on Thu Nov 30 20:47:30 2023
 
 import os
 import numpy as np
-from audio_nn.audio import load_wav_16k_mono, zero_pad_wav, compute_mfcc, compute_stft, compute_chroma_stft, add_noise, random_gain, mix_advanced, random_crop
+from audio_nn.audio import load_wav_8k_mono, zero_pad_wav, compute_mfcc, compute_stft, compute_chroma_stft, add_noise, random_gain, mix_advanced, random_crop, change_pitch
 from sklearn.utils import shuffle
 from sklearn.preprocessing import OneHotEncoder
 from sklearn.utils.class_weight import compute_class_weight
@@ -126,12 +126,12 @@ def noise_augmentation(noise_types=['white', 'pink', 'brown', 'gaussian'], min_n
         return sound
     return add_noise_aux
 
-def mix_augmentation(negative_dataset, min_ratio=0.05, max_ratio=0.5, p=0.5):
+def mix_augmentation(negative_dataset, min_ratio=0.05, max_ratio=0.2, p=0.5):
     def mix_sounds(sound1):
         if random.random() > p:
             return sound1
         index = random.randint(0, len(negative_dataset)-1)
-        sound2 = load_wav_16k_mono(negative_dataset[index])
+        sound2 = load_wav_8k_mono(negative_dataset[index])
         sound2 = random_crop(sound2, len(sound1))
         ratio = random.uniform(1-max_ratio, 1-min_ratio)
         mixed = mix_advanced(sound1, sound2, ratio)
@@ -146,7 +146,14 @@ def gain_augmentation(max_db=10, p=0.5):
         return sound
     return random_gain_aux
 
-def crop_augmentation(new_length=12288, p=0.5):
+def pitch_augmentation(max_variation = 0.05, p=0.5):
+    def change_pitch_aux(sound):
+        if random.random() > p:
+            return sound
+        return change_pitch(sound, max_variation)
+    return change_pitch_aux
+
+def crop_augmentation(new_length=6144, p=0.5):
     def random_crop_aux(sound):
         if random.random() > p:
             return sound
@@ -165,7 +172,7 @@ def data_generator(config, files, labels, batch_size, augmentation_generator = N
             keep_samples = config.getint("Audio data", "keep_samples")
             time_steps = config.getint("Model", "time_steps")
 
-            wavs = [load_wav_16k_mono(filename) for filename in files_batch]
+            wavs = [load_wav_8k_mono(filename) for filename in files_batch]
             wavs = [augmentation_generator(wav) for wav in wavs]
             wavs = np.array([zero_pad_wav(wav, samples=keep_samples) for wav in wavs])
 
@@ -178,6 +185,7 @@ def data_generator(config, files, labels, batch_size, augmentation_generator = N
                 compute_fn = switch_compute_fn(feature_type)
                 feature = [compute_fn(wav, time_axis, k_axis, n_fft) for wav in wavs]
 
+                #TODO normalize only one sample
                 feature = (feature-np.min(feature))/(np.max(feature)-np.min(feature))
                 # feature = (feature-(-1))/(1-(-1))
                 # TODO ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -185,6 +193,9 @@ def data_generator(config, files, labels, batch_size, augmentation_generator = N
                 feature = np.array(feature)
                 if quantize:
                     feature = feature.astype(np.uint8)
+                # TODO This may be wrong:
+                feature = feature.astype(np.float32)
+
                 features_dict[feature_type] = feature
 
                 if time_steps > 1:
@@ -194,43 +205,64 @@ def data_generator(config, files, labels, batch_size, augmentation_generator = N
             
             yield [features_dict[feature_type] for feature_type in feature_types], labels_batch
 
-def representative_data_generator(config, files, batch_size, time_axis = None, k_axis = None, quantize = False):
-    representative_data = []
-    for i in range(0, len(files), batch_size):
-        files_batch = files[i:i+batch_size]
+def data_generator_testing(config, files, labels, batch_size, augmentation_generator = None, time_axis = None, k_axis = None, quantize = False):
+    while True:
+        for i in range(0, len(files), batch_size):
+            files_batch = files[i:i+batch_size]
+            labels_batch = labels[i:i+batch_size]
 
-        n_fft = config.getint('Audio data', 'n_fft')
-        feature_types = config.get("Audio data", "feature_types").split(',')
-        keep_samples = config.getint("Audio data", "keep_samples")
-        time_steps = config.getint("Model", "time_steps")
-        wavs = np.array([zero_pad_wav(load_wav_16k_mono(filename), keep_samples) for filename in files_batch])
+            n_fft = config.getint('Audio data', 'n_fft')
+            feature_types = config.get("Audio data", "feature_types").split(',')
+            keep_samples = config.getint("Audio data", "keep_samples")
+            time_steps = config.getint("Model", "time_steps")
 
-        features_dict = {}
-        for feature_type in feature_types:
-            if time_axis is None:
-                time_axis = config.getint('Audio data', f'{feature_type}_time_axis')
-            if k_axis is None:
-                k_axis = config.getint('Audio data', f'{feature_type}_k_axis')
-            compute_fn = switch_compute_fn(feature_type)
-            feature = [compute_fn(wav, time_axis, k_axis, n_fft) for wav in wavs]
-            feature = (feature-np.min(feature))/(np.max(feature)-np.min(feature))
-            feature = np.array(feature)
-            if quantize:
-                feature = feature.astype(np.uint8)
-            features_dict[feature_type] = feature
+            wavs = [load_wav_8k_mono(filename) for filename in files_batch]
+            wavs = np.array([zero_pad_wav(wav, samples=keep_samples) for wav in wavs])
 
-            if time_steps > 1:
-                assert feature.shape[1] % time_steps == 0
-                new_shape = (feature.shape[0], time_steps, int(feature.shape[1] / time_steps), feature.shape[2])
-                feature = feature.reshape(new_shape)
-        
-        feature = features_dict[feature_types[0]]
-        # if feature.ndim == 3:
-        #     feature = np.expand_dims(feature, axis=0)
-        yield [feature]
+            for i, wav in enumerate(wavs):
+                with open(f"/home/buu3clj/radar_ws/samples/sample_wav_{i}.bin", "wb") as file:
+                    file.write(wav)
+            
 
-        # assert len(feature_types)==1
-        # yield [features_dict[feature_types[0]]]
-        # representative_data.append(features_dict[feature_types[0]])
+            features_dict = {}
+            for feature_type in feature_types:
+                if time_axis is None:
+                    time_axis = config.getint('Audio data', f'{feature_type}_time_axis')
+                if k_axis is None:
+                    k_axis = config.getint('Audio data', f'{feature_type}_k_axis')
+                compute_fn = switch_compute_fn(feature_type)
+                feature = [compute_fn(wav, time_axis, k_axis, n_fft) for wav in wavs]
 
-    # return representative_data
+                #TODO normalize only one sample
+                feature = [(f-np.min(f))/(np.max(f)-np.min(f)) for f in feature]
+                # feature = (feature-(-1))/(1-(-1))
+                # TODO ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+                feature = np.array(feature)
+                if quantize:
+                    feature = feature.astype(np.uint8)
+                # TODO This may be wrong:
+                feature = feature.astype(np.float32)
+
+                features_dict[feature_type] = feature
+
+                if time_steps > 1:
+                    assert feature.shape[1] % time_steps == 0
+                    new_shape = (feature.shape[0], time_steps, int(feature.shape[1] / time_steps), feature.shape[2])
+                    feature = feature.reshape(new_shape)
+            
+            yield [features_dict[feature_type] for feature_type in feature_types], labels_batch
+
+# def data_generator_testing(config, files, labels, batch_size, augmentation_generator = None, time_axis = None, k_axis = None, quantize = False):
+#     while True:
+#         for i in range(0, len(files), batch_size):
+#             files_batch = files[i:i+batch_size]
+#             labels_batch = labels[i:i+batch_size]
+
+#             keep_samples = config.getint("Audio data", "keep_samples")
+
+#             wavs = [load_wav_8k_mono(filename) for filename in files_batch]
+#             wavs = [augmentation_generator(wav) for wav in wavs]
+#             wavs = np.array([zero_pad_wav(wav, samples=keep_samples) for wav in wavs])
+
+#             yield wavs, labels_batch

@@ -6,6 +6,7 @@ Created on Thu Nov 30 19:48:56 2023
 """
 
 import tensorflow as tf
+import tensorflow_model_optimization as tfmot
 import os
 from tensorflow.keras import models, layers, activations
 from tensorflow.keras.regularizers import l1
@@ -13,6 +14,8 @@ import tensorflow_hub as hub
 import ssl
 import configparser
 import copy
+import math
+import numpy as np
 
 def create_model_v4(config):
     input_shape = tuple(map(int, config.get('Model', 'input_shape').split(',')))
@@ -160,14 +163,314 @@ def create_model_v6(config):
     model = models.Model(inputs=input, outputs=output)
     return model
 
-def create_model_optuna(config, trial):
+def create_model_v999(config):
+    input_shape = (32, 256, 1)
+    model = models.Sequential()
+
+
+    model.add(layers.Conv2D(64, (5, 5), input_shape=input_shape, padding = 'same'))
+    model.add(layers.Activation(activations.relu))
+
+    model.add(layers.MaxPooling2D((3, 3)))
+
+    model.add(layers.Dropout(0.10))
+
+
+    model.add(layers.Conv2D(128, (3, 3), padding = 'same'))
+    model.add(layers.Activation(activations.relu))
+
+    model.add(layers.MaxPooling2D((3, 3)))
+
+    model.add(layers.Dropout(0.10))
+
+
+    model.add(layers.Conv2D(128, (3, 3), padding = 'same'))
+    model.add(layers.Activation(activations.relu))
+
+    model.add(layers.MaxPooling2D((3, 3)))
+
+    model.add(layers.Dropout(0.10))
+
+
+    model.add(layers.Conv2D(256, (1, 3), padding = 'same'))
+    model.add(layers.Activation(activations.relu))
+
+    model.add(layers.MaxPooling2D((1, 3)))
+
+    model.add(layers.Dropout(0.10))
+
+
+    model.add(layers.Flatten())
+
+    model.add(layers.Dense(32, activation='relu'))
+
+    model.add(layers.Dropout(0.20))
+
+    model.add(layers.Dense(2  , activation='softmax'))
+    return model
+
+max_tensor_size = 500000 # should be higher
+# max_tensor_size = 350000
+max_parameters_per_layer = 100000 # should be lower
+# max_parameters_per_layer = 90000
+max_kernel_size = 4
+min_kernel_size_pool = 2
+min_kernel_size_conv = 2
+min_stride_pool = 2
+min_stride_conv = 1
+max_dense_links = 3072
+include_batch_norm = False
+# max_dense_links = 2048
+
+def create_model_optuna_v2(config, trial):
+    time_axis = config.getint('Audio data', f'stft_time_axis')
+    k_axis = config.getint('Audio data', f'stft_k_axis')
+    input_shape = (time_axis, k_axis, 1)
+
+    model = models.Sequential()
+    
+    k1 = trial.suggest_int("conv1_k1", min_kernel_size_conv, max_kernel_size)
+    k2 = trial.suggest_int("conv1_k2", min_kernel_size_conv, max_kernel_size)
+    stride1 = trial.suggest_int("conv1_stride1", min(time_axis, min_stride_conv), k1)
+    stride2 = trial.suggest_int("conv1_stride2", min(k_axis, min_stride_conv), k2)
+    time_axis = math.ceil(time_axis / stride1)
+    k_axis = math.ceil(k_axis / stride2)
+    max_filter_number = min(math.floor(max_tensor_size / time_axis / k_axis),
+                            512)
+    filters = trial.suggest_int("conv1_filters", 0, max(1, math.floor((max_filter_number - 2) / 8)))
+    filters = (filters * 8) + 2
+    model.add(layers.Conv2D(filters, (k1, k2), (stride1, stride2), input_shape=input_shape, padding = 'same', activation = 'relu'))
+
+    if(include_batch_norm):
+        model.add(layers.BatchNormalization())
+
+    pool_type = trial.suggest_categorical("pool_type_1", ['max', 'avg'])
+    k1 = trial.suggest_int("pool1_k1", min(time_axis, min_kernel_size_pool), min(time_axis, max_kernel_size))
+    k2 = trial.suggest_int("pool1_k2", min(k_axis, min_kernel_size_pool), min(k_axis, max_kernel_size))
+    stride1 = trial.suggest_int("pool1_stride1", min(time_axis, min_stride_pool), k1)
+    stride2 = trial.suggest_int("pool1_stride2", min(k_axis, min_stride_pool), k2)
+    if pool_type == 'max':
+        model.add(layers.MaxPooling2D((k1, k2), strides = (stride1, stride2), padding = 'same'))
+    elif pool_type == 'avg':
+        model.add(layers.AveragePooling2D((k1, k2), strides = (stride1, stride2), padding = 'same'))
+
+    time_axis = math.floor((time_axis - 1) / stride1) + 1
+    k_axis = math.floor((k_axis - 1) / stride2) + 1
+
+    # model.add(layers.Dropout(0.10))
+
+
+    k1 = trial.suggest_int("conv2_k1", min(time_axis, min_kernel_size_conv), max_kernel_size)
+    k2 = trial.suggest_int("conv2_k2", min(k_axis, min_kernel_size_conv), max_kernel_size)
+    stride1 = trial.suggest_int("conv2_stride1", min(time_axis, min_stride_conv), k1)
+    stride2 = trial.suggest_int("conv2_stride2", min(k_axis, min_stride_conv), k2)
+    time_axis = math.ceil(time_axis / stride1)
+    k_axis = math.ceil(k_axis / stride2)
+    max_filter_number = min(math.floor(max_parameters_per_layer/(k1*k2*filters+1)),
+                            int(max_tensor_size / time_axis / k_axis),
+                            512) 
+    # print("max filters: ", int(max_filter_number))
+    filters = trial.suggest_int("conv2_filters", 0, max(1, math.floor((max_filter_number - 2) / 8)))
+    filters = (filters * 8) + 2 # TODO make this work
+    model.add(layers.Conv2D(filters, (k1, k2), (stride1, stride2), padding = 'same', activation = 'relu'))
+    
+    if(include_batch_norm):
+        model.add(layers.BatchNormalization())
+
+    pool_type = trial.suggest_categorical("pool_type_2", ['max', 'avg'])
+    k1 = trial.suggest_int("pool2_k1", min(time_axis, min_kernel_size_pool), min(time_axis, max_kernel_size))
+    k2 = trial.suggest_int("pool2_k2", min(k_axis, min_kernel_size_pool), min(k_axis, max_kernel_size))
+    stride1 = trial.suggest_int("pool2_stride1", min(time_axis, min_stride_pool), k1)
+    stride2 = trial.suggest_int("pool2_stride2", min(k_axis, min_stride_pool), k2)
+    if pool_type == 'max':
+        model.add(layers.MaxPooling2D((k1, k2), strides = (stride1, stride2), padding = 'same'))
+    elif pool_type == 'avg':
+        model.add(layers.AveragePooling2D((k1, k2), strides = (stride1, stride2), padding = 'same'))
+
+    time_axis = math.floor((time_axis - 1) / stride1) + 1
+    k_axis = math.floor((k_axis - 1) / stride2) + 1
+
+    # model.add(layers.Dropout(0.10))
+
+
+
+    k1 = trial.suggest_int("conv3_k1", min(time_axis, min_kernel_size_conv), max_kernel_size)
+    k2 = trial.suggest_int("conv3_k2", min(k_axis, min_kernel_size_conv), max_kernel_size)
+    stride1 = trial.suggest_int("conv3_stride1", min(time_axis, min_stride_conv), k1)
+    stride2 = trial.suggest_int("conv3_stride2", min(k_axis, min_stride_conv), k2)
+    time_axis = math.ceil(time_axis / stride1)
+    k_axis = math.ceil(k_axis / stride2)
+    max_filter_number = min(math.floor(max_parameters_per_layer/(k1*k2*filters+1)),
+                            int(max_tensor_size / time_axis / k_axis),
+                            512)
+    # print("max filters: ", math.floor(max_filter_number))
+    filters = trial.suggest_int("conv3_filters", 0, max(1, math.floor((max_filter_number - 2) / 8)))
+    filters = (filters * 8) + 2
+    model.add(layers.Conv2D(filters, (k1, k2), (stride1, stride2), padding = 'same', activation = 'relu'))
+
+    if(include_batch_norm):
+        model.add(layers.BatchNormalization())
+
+    pool_type = trial.suggest_categorical("pool_type_3", ['max', 'avg'])
+    k1 = trial.suggest_int("pool3_k1", min(time_axis, min_kernel_size_pool), min(time_axis, max_kernel_size))
+    k2 = trial.suggest_int("pool3_k2", min(k_axis, min_kernel_size_pool), min(k_axis, max_kernel_size))
+    stride1 = trial.suggest_int("pool3_stride1", min(time_axis, min_stride_pool), k1)
+    stride2 = trial.suggest_int("pool3_stride2", min(k_axis, min_stride_pool), k2)
+    if pool_type == 'max':
+        model.add(layers.MaxPooling2D((k1, k2), strides = (stride1, stride2), padding = 'same'))
+    elif pool_type == 'avg':
+        model.add(layers.AveragePooling2D((k1, k2), strides = (stride1, stride2), padding = 'same'))
+
+    time_axis = math.floor((time_axis - 1) / stride1) + 1
+    k_axis = math.floor((k_axis - 1) / stride2) + 1
+
+    # model.add(layers.Dropout(0.10))
+
+
+    
+
+    pool_type = trial.suggest_categorical("pool_type_4", ['max', 'avg'])
+
+    k1 = trial.suggest_int("pool4_k1", min(min_kernel_size_pool, time_axis), min(time_axis, max_kernel_size))
+    k2 = trial.suggest_int("pool4_k2", min(min_kernel_size_pool, k_axis), min(k_axis, max_kernel_size))
+    
+    stride1 = trial.suggest_int("pool4_stride1", min(time_axis, min_stride_pool), k1)
+    stride2 = trial.suggest_int("pool4_stride2", min(k_axis, min_stride_pool), k2)
+
+    k1conv = trial.suggest_int("conv4_k1", min(time_axis, min_kernel_size_conv), max_kernel_size)
+    k2conv = trial.suggest_int("conv4_k2", min(k_axis, min_kernel_size_conv), max_kernel_size)
+    max_filter_number =  min(math.floor(max_tensor_size / time_axis / k_axis),
+                       math.floor(max_dense_links/(math.floor((time_axis - 1) / stride1) + 1)/(math.floor((k_axis - 1) / stride2) + 1)),
+                       math.floor(max_parameters_per_layer/(k1conv*k2conv*filters+1)),
+                       512)
+    # print("max filters (tensor size): ", math.floor(max_tensor_size / time_axis / k_axis))
+    # print("max filters (dense links): ", math.floor(max_dense_links/(math.floor((time_axis - 1) / stride1) + 1)/(math.floor((k_axis - 1) / stride2) + 1)))
+    # print("max filters (parameters): ", math.floor(max_parameters_per_layer/(k1conv*k2conv*filters+1)))
+    filters = trial.suggest_int("conv4_filters", 0, max(1, math.floor((max_filter_number - 2) / 8)))
+    filters = (filters * 8) + 2
+    model.add(layers.Conv2D(filters, (k1conv, k2conv), padding = 'same', activation = 'relu'))
+
+    if(include_batch_norm):
+        model.add(layers.BatchNormalization())
+
+    if pool_type == 'max':
+        model.add(layers.MaxPooling2D((k1, k2), strides = (stride1, stride2), padding = 'same'))
+    elif pool_type == 'avg':
+        model.add(layers.AveragePooling2D((k1, k2), strides = (stride1, stride2), padding = 'same'))
+
+    time_axis = math.floor((time_axis - 1) / stride1) + 1
+    k_axis = math.floor((k_axis - 1) / stride2) + 1
+
+    total_size = time_axis * k_axis * filters
+
+    # model.add(layers.Dropout(0.10))
+
+
+    model.add(layers.Flatten())
+
+    max_dense_nodes = max_dense_links/total_size
+    dense_nodes = trial.suggest_int("dense", 4, max(4, max_dense_nodes))
+    model.add(layers.Dense(dense_nodes, activation='relu'))
+
+    if(include_batch_norm):
+        model.add(layers.BatchNormalization())
+
+    model.add(layers.Dropout(0.25))
+
+    model.add(layers.Dense(2, activation='softmax'))
+
+
+    # new_model = models.Sequential()
+
+    # skip_index = [i for i, l in enumerate(model.layers) if isinstance(l, layers.MaxPooling2D)][3]
+
+    # for i, layer in enumerate(model.layers):
+    #     if i != skip_index:
+    #         new_model.add(layer)
+
+    # for i, layer in enumerate(new_model.layers):
+    #     original_index = i if i < skip_index else i + 1
+    #     layer.set_weights(model.layers[original_index].get_weights())
+
+
+
+    return model
+
+def create_model_optuna(config, trial, optimizing = True):
     feature_types = config.get("Audio data", "feature_types").split(',')
     num_classes = config.getint('Dataset', 'num_classes')
 
     flatten = []
     inputs = []
     for feature_type in feature_types:
-        time_axis = config.getint('Audio data', f'{feature_type}_time_axis')
+        time_axis = time_axis = config.getint('Audio data', f'{feature_type}_time_axis')
+        k_axis = config.getint('Audio data', f'{feature_type}_k_axis')
+        input = layers.Input(shape=(time_axis, k_axis, 1))
+        inputs.append(input)
+        num_conv_layers = trial.suggest_int(f'num_conv_layers_{feature_type}', 2, 8)
+        aux = input
+        for j in range(num_conv_layers):
+            shape = aux.shape
+            k = trial.suggest_int(f'kernel_size_{feature_type}_{j}', 3, max(3, min(shape[1], shape[2], 9)))
+            filters = trial.suggest_int(f'num_filters_{feature_type}_{j}', 16, 384)
+            # strides = trial.suggest_int(f'stride_{feature_type}_{j}', 1, 5)
+            strides = 1
+
+            if shape[2]/shape[1] >= 3.0 and shape[1] == 1 :
+                kernel_size = (1, k)
+            else:
+                kernel_size = (k, k)
+
+            conv = layers.Conv2D(filters, kernel_size, strides)(aux)
+
+            act = layers.Activation(activations.relu)(conv)
+
+            if ((shape[1]-k/2)/strides)*((shape[2]-k/2)/strides)*filters > 800000:
+                print("Tensor size: ", (shape[1]-k/2)*(shape[2]-k)*filters)
+                return None
+                
+            
+            shape = act.shape
+            s = trial.suggest_int(f'pooling_strides_{feature_type}_{j}', 1, 6)
+            pooling_size = trial.suggest_int(f'pooling_size_{feature_type}_{j}', s, min(shape[1],shape[2],6))
+            
+            
+            strides = (s, s)
+
+            if shape[2]/shape[1]>1.9:
+                pooling_size = (1, pooling_size)
+            else:
+                pooling_size = (pooling_size, pooling_size)
+            pooling = layers.MaxPooling2D(pooling_size, strides = strides)(act)
+
+            dropout = layers.Dropout(0.10)(pooling)
+            aux = dropout
+        flatten.append(layers.Flatten()(dropout))
+
+    if len(feature_types)==1:
+        concat = flatten[0]
+    else:
+        concat = layers.Concatenate()(flatten)
+
+    dense_units = trial.suggest_int('dense_units', 12, 36)
+    dense = layers.Dense(dense_units, activation='relu')(concat)
+    if optimizing:
+        dropout_rate = trial.suggest_float('dropout_rate', 0, 0.3)
+    else:
+        dropout_rate = 0.1
+    dropout = layers.Dropout(dropout_rate)(dense)
+    output = layers.Dense(num_classes, activation='softmax')(dropout)
+    model = models.Model(inputs=inputs, outputs=output)
+    return model
+
+def create_model_optuna_depthwise(config, trial):
+    feature_types = config.get("Audio data", "feature_types").split(',')
+    num_classes = config.getint('Dataset', 'num_classes')
+
+    flatten = []
+    inputs = []
+    for feature_type in feature_types:
+        time_axis = time_axis = config.getint('Audio data', f'{feature_type}_time_axis')
         k_axis = config.getint('Audio data', f'{feature_type}_k_axis')
         input = layers.Input(shape=(time_axis, k_axis, 1))
         inputs.append(input)
@@ -176,12 +479,18 @@ def create_model_optuna(config, trial):
         for j in range(num_conv_layers):
             shape = aux.shape
             k = trial.suggest_int(f'kernel_size_{feature_type}_{j}', 1, min(shape[1], shape[2], 6))
-            filters = trial.suggest_int(f'num_filters_{feature_type}_{j}', 16, 512)
+            # filters = trial.suggest_int(f'num_filters_{feature_type}_{j}', 16, 400)
+
+            max_depthwise_multiplier = 1000000 / ((shape[1]-k/2)*(shape[2]-k/2))
+
+            depth_multiplier = trial.suggest_int(f'depth_multiplier_{feature_type}_{j}', 1, 4)
             kernel_size = (k, k)
 
-            conv = layers.Conv2D(filters, kernel_size)(aux)
-            act = layers.Activation(activations.relu)(conv)
+            # conv = layers.Conv2D(filters, kernel_size)(aux)
+            conv = layers.DepthwiseConv2D(kernel_size, depth_multiplier = depth_multiplier)(aux)
 
+            act = layers.Activation(activations.relu)(conv)
+                
             s = trial.suggest_int(f'pooling_strides_{feature_type}_{j}', 1, 6)
             strides = (s, s)
             shape = act.shape
@@ -379,6 +688,48 @@ def load_model(config, custom_objects = None):
         # assert False
         return loaded_model, configOld
 
+def load_tflite_model(config):
+    full_path = config.get("Model", "load_dir")
+    model_path = os.path.join(full_path, "model.tflite")
+    # Create an interpreter for the TFLite model
+    loaded_model = tf.lite.Interpreter(model_path=model_path)
+    loaded_model.allocate_tensors()  # Allocate tensors to the interpreter
+
+    configOld = configparser.ConfigParser()
+    configOld.read(os.path.join(full_path, 'config.ini'))
+    #TODO: copy the dirs from the new config to the old config
+    configOld["Model"]["save_dir"] = config.get("Model", "save_dir")
+
+    return loaded_model, configOld
+
+def predict_tflite(interpreter, input_data):
+    # Get input and output details from the interpreter
+    input_details = interpreter.get_input_details()
+    output_details = interpreter.get_output_details()
+
+    # Check the expected datatype of the input tensor and adjust if necessary
+    if input_details[0]['dtype'] == np.float32:
+        input_scale, input_zero_point = input_details[0]['quantization']
+        if input_scale != 0:
+            input_data = input_data / input_scale + input_zero_point
+
+    # Set the model's input tensor
+    interpreter.set_tensor(input_details[0]['index'], input_data)
+
+    # Run inference
+    interpreter.invoke()
+
+    # Extract the output tensor
+    output_data = interpreter.get_tensor(output_details[0]['index'])
+
+    # If output data is quantized, convert it back to float32
+    if output_details[0]['dtype'] == np.int8:
+        output_scale, output_zero_point = output_details[0]['quantization']
+        output_data = (output_data - output_zero_point) * output_scale
+        output_data = output_data.astype(np.float32)
+
+    return output_data
+
 def quantize_model(config, model, representative_dataset):
     converter = tf.lite.TFLiteConverter.from_keras_model(model)
     converter.optimizations = [tf.lite.Optimize.DEFAULT]
@@ -387,3 +738,54 @@ def quantize_model(config, model, representative_dataset):
     quant_model = converter.convert()
     print("\nQuantization ended!\n")
     return quant_model
+
+def weighted_categorical_crossentropy(weights):
+    """
+    A weighted version of keras.objectives.categorical_crossentropy
+
+    Variables:
+        weights: numpy array of shape (C,) where C is the number of classes
+
+    Usage:
+        weights = np.array([0.5, 2.0]) # for example
+        loss = weighted_categorical_crossentropy(weights)
+        model.compile(loss=loss, optimizer='adam')
+    """
+    weights = tf.keras.backend.variable(weights)
+    
+    def loss(y_true, y_pred):
+        # scale predictions so that the class probas of each sample sum to 1
+        y_pred /= tf.keras.backend.sum(y_pred, axis=-1, keepdims=True)
+        # clip to prevent NaN's and Inf's
+        y_pred = tf.keras.backend.clip(y_pred, tf.keras.backend.epsilon(), 1 - tf.keras.backend.epsilon())
+        # calc
+        loss = y_true * tf.keras.backend.log(y_pred) * weights
+        loss = -tf.keras.backend.sum(loss, -1)
+        return loss
+
+    return loss
+
+class BatchNormQuantizeConfig(tfmot.quantization.keras.QuantizeConfig):
+    def get_weights_and_quantizers(self, layer):
+        return [
+            (layer.gamma, tfmot.quantization.keras.quantizers.MovingAverageQuantizer(
+                num_bits=8, per_axis=False, symmetric=False, narrow_range=False)),
+            (layer.beta, tfmot.quantization.keras.quantizers.MovingAverageQuantizer(
+                num_bits=8, per_axis=False, symmetric=False, narrow_range=False))
+        ]
+
+    def get_activations_and_quantizers(self, layer):
+        return []
+
+    def set_quantize_weights(self, layer, quantize_weights):
+        layer.gamma, layer.beta = quantize_weights
+
+    def set_quantize_activations(self, layer, quantize_activations):
+        pass
+
+    def get_output_quantizers(self, layer):
+        return [tfmot.quantization.keras.quantizers.MovingAverageQuantizer(
+            num_bits=8, per_axis=False, symmetric=False, narrow_range=False)]
+
+    def get_config(self):
+        return {}

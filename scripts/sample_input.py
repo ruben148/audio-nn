@@ -14,12 +14,12 @@ config = configparser.ConfigParser()
 config.read('/home/buu3clj/radar_ws/audio_nn/scripts/config.ini')
 
 with tfmot.quantization.keras.quantize_scope():
-    model, config = model_utils.load_model(config)
+    model, config = model_utils.load_tflite_model(config)
 
-model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=config.getfloat("Training", "lr")), 
-                loss='categorical_crossentropy', 
-                metrics=['accuracy'])
-print(model.summary())
+# model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=config.getfloat("Training", "lr")), 
+#                 loss='categorical_crossentropy', 
+#                 metrics=['accuracy'])
+# print(model.summary())
 
 files, labels, classes, class_weights = dataset_utils.load_dataset(config)
 
@@ -32,28 +32,37 @@ files_train, files_val, labels_train, labels_val = train_test_split(files, label
 
 batch_size = config.getint("Training", "batch_size")
 
-augmentation_gen = dataset_utils.augmentation_generator([
-    dataset_utils.crop_augmentation(new_length=config.getint("Audio data", "keep_samples"), p=1.0),
-    dataset_utils.gain_augmentation(max_db=5, p=0.8),
-    dataset_utils.noise_augmentation(max_noise_ratio=0.08, p=0.6),
-    dataset_utils.mix_augmentation(augmentation_datasets[0], p=0.35),
-    dataset_utils.mix_augmentation(augmentation_datasets[1], p=0.35),
-    dataset_utils.noise_augmentation(min_noise_ratio=0.01, max_noise_ratio=0.05, p=0.6),
-    dataset_utils.gain_augmentation(max_db=5)
-])
+# augmentation_gen = dataset_utils.augmentation_generator([
+#     dataset_utils.crop_augmentation(new_length=config.getint("Audio data", "keep_samples"), p=1.0),
+#     dataset_utils.gain_augmentation(max_db=3, p=1.0),
+#     dataset_utils.noise_augmentation(max_noise_ratio=0.06, p=1.0),
+#     dataset_utils.mix_augmentation(augmentation_datasets[0], min_ratio=0.001, max_ratio=0.25, p=0.4),
+#     dataset_utils.mix_augmentation(augmentation_datasets[1], min_ratio=0.001, max_ratio=0.25, p=0.4),
+#     dataset_utils.mix_augmentation(augmentation_datasets[2], min_ratio=0.001, max_ratio=0.25, p=0.4),
+#     dataset_utils.noise_augmentation(min_noise_ratio=0.01, max_noise_ratio=0.03, p=1.0),
+#     dataset_utils.gain_augmentation(max_db=2, p=1.0)
+# ])
 
-data_gen_train = dataset_utils.data_generator(config, files_train, labels_train, batch_size, augmentation_gen)
-data_gen_val = dataset_utils.data_generator(config, files_val, labels_val, batch_size, augmentation_gen)
+data_gen_train = dataset_utils.data_generator_testing(config, files_train, labels_train, batch_size, None)
+data_gen_val = dataset_utils.data_generator_testing(config, files_val, labels_val, batch_size, None)
 
 images, samples = next(data_gen_val)
 
-image_to_save = np.array(images[0][0])
+img = np.array(images[0][0])
+print(img.shape)
 
-image_flat = image_to_save.flatten()
+# image_flat = image_to_save.flatten()
 
-outputs = model(np.reshape(image_to_save, (1,32,179,1)))
+# outputs = model(np.reshape(image_to_save, (1,32,256,1)))
 
-print(outputs)
+for i, stft in enumerate(images[0]):
+        with open(f"/home/buu3clj/radar_ws/samples/sample_stft_{i}.bin", "wb") as file:
+            file.write(stft)
 
-with open("/home/buu3clj/radar_ws/sample_image.bin", "wb") as file:
-    file.write(image_flat)
+for i, image_to_save in enumerate(images[0]):
+    image_to_save = np.reshape(image_to_save, (1,32,256,1))
+    outputs = model_utils.predict_tflite(model, image_to_save)
+    print(i, outputs)
+
+# with open("/home/buu3clj/radar_ws/sample_image_2.bin", "wb") as file:
+#     file.write(image_flat)
